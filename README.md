@@ -31,8 +31,8 @@
 ### 运行
 
 ```bash
-git clone https://github.com/Fanhua041027/ai-assistant.git
-cd ai-assistant
+git clone https://github.com/Fanhua041027/magic-brush.git
+cd magic-brush
 
 # 安装 Go 前端依赖
 cd frontend && npm install && cd ..
