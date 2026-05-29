@@ -43,6 +43,13 @@ type KBLoadResult struct {
 	Error        string `json:"error,omitempty"`
 }
 
+type KBInfoResult struct {
+	Ready        bool   `json:"ready"`
+	FileCount    int    `json:"file_count"`
+	SectionCount int    `json:"section_count"`
+	KBPath       string `json:"kb_path"`
+}
+
 type KBSearchResult struct {
 	Results []KBSearchItem `json:"results"`
 	Error   string        `json:"error,omitempty"`
@@ -121,6 +128,19 @@ func (c *Client) KBLoad(path string) (*KBLoadResult, error) {
 	}
 	defer resp.Body.Close()
 	var result KBLoadResult
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+func (c *Client) KBInfo() (*KBInfoResult, error) {
+	resp, err := c.http.Get(c.baseURL + "/api/kb/info")
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	var result KBInfoResult
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, err
 	}

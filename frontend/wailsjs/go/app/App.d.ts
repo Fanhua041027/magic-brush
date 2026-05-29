@@ -94,6 +94,10 @@ export function LoadKB(arg1:string):Promise<{[key:string]:any}>;
 
 export function SearchKB(arg1:string):Promise<{[key:string]:any}>;
 
+export function SelectKBDirectory():Promise<string>;
+
+export function ClearKB():Promise<void>;
+
 export function SetPendingUserMessage(arg1:string):Promise<void>;
 
 export function UpdateSettings(arg1:string):Promise<string>;

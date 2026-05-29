@@ -182,6 +182,14 @@ export function SearchKB(arg1) {
   return window['go']['app']['App']['SearchKB'](arg1);
 }
 
+export function SelectKBDirectory() {
+  return window['go']['app']['App']['SelectKBDirectory']();
+}
+
+export function ClearKB() {
+  return window['go']['app']['App']['ClearKB']();
+}
+
 export function SetPendingUserMessage(arg1) {
   return window['go']['app']['App']['SetPendingUserMessage'](arg1);
 }

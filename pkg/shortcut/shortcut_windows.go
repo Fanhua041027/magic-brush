@@ -127,19 +127,19 @@ func keyboardHookProc(nCode int, wParam uintptr, lParam uintptr) uintptr {
 		// 将 lParam 指针转换为键盘钩子结构体
 		kbd := (*platform.KBDLLHOOKSTRUCT)(unsafe.Pointer(lParam))
 
-		// Push-to-talk: Left Alt 长按录音
+		// Push-to-talk: Left Alt 长按录音 (异步调用避免阻塞键盘钩子)
 		if kbd.VkCode == VK_LMENU {
 			if wParam == platform.WM_SYSKEYDOWN || wParam == platform.WM_KEYDOWN {
 				globalManager.heldKeys[kbd.VkCode] = true
 				if len(globalManager.heldKeys) == 1 && globalManager.OnPushToTalkStart != nil {
-					globalManager.OnPushToTalkStart()
+					go globalManager.OnPushToTalkStart()
 				}
 				return 1 // 吞掉 Left Alt，不传递给系统
 			}
 			if wParam == platform.WM_SYSKEYUP || wParam == platform.WM_KEYUP {
 				delete(globalManager.heldKeys, kbd.VkCode)
 				if globalManager.OnPushToTalkStop != nil {
-					globalManager.OnPushToTalkStop()
+					go globalManager.OnPushToTalkStop()
 				}
 				return 1
 			}

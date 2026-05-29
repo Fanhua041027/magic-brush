@@ -92,6 +92,17 @@ def stt_record():
 
 # ── KB (Knowledge Base) ─────────────────────────────────────────────
 
+@app.route("/api/kb/info", methods=["GET"])
+def kb_info():
+    if kb is None or not kb.ready:
+        return jsonify({"ready": False, "file_count": 0, "section_count": 0, "kb_path": ""})
+    return jsonify({
+        "ready": True,
+        "file_count": getattr(kb, 'file_count', 0),
+        "section_count": len(kb.chunks),
+        "kb_path": kb.kb_path or "",
+    })
+
 @app.route("/api/kb/search", methods=["POST"])
 def kb_search():
     global kb

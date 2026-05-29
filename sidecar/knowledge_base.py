@@ -22,10 +22,10 @@ class KnowledgeBase:
         self.kb_path = kb_path
         self.chunks = []
         self.idf = {}
+        md_files = [f for f in os.listdir(kb_path) if f.endswith('.md')]
+        self.file_count = len(md_files)
         all_texts = []
-        for fname in sorted(os.listdir(kb_path)):
-            if not fname.endswith('.md'):
-                continue
+        for fname in md_files:
             fpath = os.path.join(kb_path, fname)
             try:
                 with open(fpath, 'r', encoding='utf-8') as f:
@@ -37,7 +37,7 @@ class KnowledgeBase:
             all_texts.extend(s['content'] for s in sections)
         self._compute_idf(all_texts)
         self.ready = True
-        result = {"file_count": len(all_texts), "section_count": len(self.chunks)}
+        result = {"file_count": self.file_count, "section_count": len(self.chunks)}
         return result
 
     @staticmethod

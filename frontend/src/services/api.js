@@ -14,6 +14,8 @@ import {
   GetKBStatus,
   LoadKB,
   SearchKB,
+  SelectKBDirectory,
+  ClearKB,
   SetPendingUserMessage,
   MoveWindow,
   OpenScreenCaptureSettings,
@@ -88,5 +90,7 @@ export const api = {
   getKBStatus: () => GetKBStatus(),
   loadKB: (path) => LoadKB(path),
   searchKB: (query) => SearchKB(query),
+  selectKBDirectory: () => SelectKBDirectory(),
+  clearKB: () => ClearKB(),
   setUserMessage: (text) => SetPendingUserMessage(text),
 }

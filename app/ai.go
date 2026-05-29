@@ -1,5 +1,12 @@
 package app
 
+import (
+	"ai-assistant/pkg/config"
+	"ai-assistant/pkg/logger"
+
+	"github.com/wailsapp/wails/v2/pkg/runtime"
+)
+
 // ── STT (Speech-to-Text) bindings ─────────────────────────────────────
 
 func (a *App) GetSTTStatus() map[string]bool {
@@ -112,8 +119,50 @@ func (a *App) GetKBStatus() map[string]interface{} {
 	}
 
 	cfg := a.configManager.Get()
-	return map[string]interface{}{
-		"ready":     cfg.KBPath != "",
-		"kb_path":   cfg.KBPath,
+	result := map[string]interface{}{
+		"ready":   cfg.KBPath != "",
+		"kb_path": cfg.KBPath,
 	}
+
+	// Query actual section/file counts from sidecar
+	info, err := a.sidecar.Client().KBInfo()
+	if err == nil {
+		result["file_count"] = info.FileCount
+		result["section_count"] = info.SectionCount
+	}
+	return result
+}
+
+func (a *App) SelectKBDirectory() string {
+	if a.ctx == nil {
+		return ""
+	}
+	dir, err := runtime.OpenDirectoryDialog(a.ctx, runtime.OpenDialogOptions{
+		Title: "选择知识库目录（含 .md 文件）",
+	})
+	if err != nil || dir == "" {
+		return ""
+	}
+	// Save path in config
+	a.configManager.Patch(func(cfg *config.Config) {
+		cfg.KBPath = dir
+	})
+	// Load into sidecar
+	if a.sidecar != nil && a.sidecar.IsRunning() {
+		result, err := a.sidecar.Client().KBLoad(dir)
+		if err != nil {
+			logger.Printf("[KB] Load failed: %v", err)
+		} else {
+			logger.Printf("[KB] Loaded: %d files, %d sections", result.FileCount, result.SectionCount)
+		}
+	}
+	return dir
+}
+
+func (a *App) ClearKB() {
+	a.configManager.Patch(func(cfg *config.Config) {
+		cfg.KBPath = ""
+	})
+	a.EmitEvent("kb-cleared")
+	logger.Println("[KB] Cleared")
 }
