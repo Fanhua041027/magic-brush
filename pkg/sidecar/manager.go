@@ -2,6 +2,7 @@ package sidecar
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"time"
 
@@ -29,6 +30,7 @@ func (m *Manager) Start(model, device string) error {
 
 	args := []string{scriptPath, "--port", fmt.Sprintf("%d", m.port), "--model", model, "--device", device}
 	m.cmd = exec.Command("python", args...)
+	m.cmd.Env = append(os.Environ(), "HF_ENDPOINT=https://hf-mirror.com")
 
 	if err := m.cmd.Start(); err != nil {
 		m.cmd = nil
