@@ -154,6 +154,30 @@ export function TriggerSolve() {
   return window['go']['app']['App']['TriggerSolve']();
 }
 
+export function GetSTTStatus() {
+  return window['go']['app']['App']['GetSTTStatus']();
+}
+
+export function ToggleSTT() {
+  return window['go']['app']['App']['ToggleSTT']();
+}
+
+export function GetKBStatus() {
+  return window['go']['app']['App']['GetKBStatus']();
+}
+
+export function LoadKB(arg1) {
+  return window['go']['app']['App']['LoadKB'](arg1);
+}
+
+export function SearchKB(arg1) {
+  return window['go']['app']['App']['SearchKB'](arg1);
+}
+
+export function SetPendingUserMessage(arg1) {
+  return window['go']['app']['App']['SetPendingUserMessage'](arg1);
+}
+
 export function UpdateSettings(arg1) {
   return window['go']['app']['App']['UpdateSettings'](arg1);
 }

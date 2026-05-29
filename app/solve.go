@@ -4,11 +4,13 @@ import (
 	"ai-assistant/pkg/logger"
 	"ai-assistant/pkg/solution"
 	"context"
+	"strings"
 )
 
 const MaxScreenshots = 3
 
 var screenshotBuffer []string
+var pendingUserMessage string
 
 func (a *App) TriggerScreenshot() {
 	cfg := a.configManager.Get()
@@ -143,6 +145,31 @@ func (a *App) solveInternal(ctx context.Context, screenshots []string) bool {
 	req := solution.Request{
 		Config:      cfg,
 		Screenshots: screenshots,
+		UserMessage: pendingUserMessage,
+	}
+	pendingUserMessage = ""
+
+	// Auto-inject KB context if sidecar is running and KB is configured
+	if cfg.KBPath != "" && a.sidecar != nil && a.sidecar.IsRunning() {
+		searchQuery := req.UserMessage
+		if searchQuery == "" {
+			searchQuery = cfg.DomainId
+		}
+		if searchQuery != "" {
+			searchResult, err := a.sidecar.Client().KBSearch(searchQuery, 5)
+			if err == nil && len(searchResult.Results) > 0 {
+				var kbCtx strings.Builder
+				for _, item := range searchResult.Results {
+					kbCtx.WriteString("\n---\n")
+					kbCtx.WriteString("来源: ")
+					kbCtx.WriteString(item.Source)
+					kbCtx.WriteString("\n")
+					kbCtx.WriteString(item.Content)
+				}
+				req.KBContext = kbCtx.String()
+				logger.Printf("[Solve] Injected %d KB sections", len(searchResult.Results))
+			}
+		}
 	}
 
 	cb := solution.Callbacks{
@@ -150,6 +177,10 @@ func (a *App) solveInternal(ctx context.Context, screenshots []string) bool {
 	}
 
 	return a.solver.Solve(ctx, req, cb)
+}
+
+func (a *App) SetPendingUserMessage(text string) {
+	pendingUserMessage = text
 }
 
 func (a *App) CancelRunningTask() bool {

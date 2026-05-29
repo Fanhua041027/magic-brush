@@ -20,6 +20,8 @@ type Callbacks struct {
 type Request struct {
 	Config      config.Config
 	Screenshots []string
+	UserMessage string // optional text from STT or typed input
+	KBContext   string // optional knowledge base context
 }
 
 type Solver struct {
@@ -73,9 +75,19 @@ func (s *Solver) Solve(ctx context.Context, req Request, cb Callbacks) bool {
 		systemPrompt.WriteString("</CandidateProfile>\n")
 	}
 
+	if req.KBContext != "" {
+		logger.Println("注入知识库上下文")
+		systemPrompt.WriteString("\n\n<KnowledgeBase>\n")
+		systemPrompt.WriteString(req.KBContext)
+		systemPrompt.WriteString("\n</KnowledgeBase>\n")
+	}
+
 	logger.Println("system 提示词:", systemPrompt.String())
 
-	userParts := make([]llm.ContentPart, 0, len(req.Screenshots))
+	userParts := make([]llm.ContentPart, 0, len(req.Screenshots)+1)
+	if req.UserMessage != "" {
+		userParts = append(userParts, llm.TextPart(req.UserMessage))
+	}
 	for _, screenshot := range req.Screenshots {
 		userParts = append(userParts, llm.ImagePart(screenshot))
 	}

@@ -10,6 +10,10 @@
       </div>
 
       <div class="bar-right" style="--wails-draggable: no-drag">
+        <STTButton />
+
+        <div class="bar-divider" />
+
         <div class="shortcuts-hint">
           <kbd>{{ settingsStore.solveShortcut }}</kbd>
           <kbd>{{ settingsStore.sendShortcut }}</kbd>
@@ -83,6 +87,7 @@ import { useUIStore } from '../stores/ui'
 import { useSettingsStore } from '../stores/settings'
 import Icon from './Icon.vue'
 import ThemeToggle from './ThemeToggle.vue'
+import STTButton from './STTButton.vue'
 
 defineEmits(['openSettings'])
 

@@ -23,6 +23,9 @@ export const useSettingsStore = defineStore('settings', () => {
     sharpening: 0,
     grayscale: true,
     noCompression: false,
+    kbPath: '',
+    sttModel: 'base',
+    sttDevice: 'auto',
   })
 
   const tempSettings = reactive({ ...settings })
@@ -179,6 +182,9 @@ export const useSettingsStore = defineStore('settings', () => {
     settings.resumePath = config.resumePath || ''
     settings.resumeContent = config.resumeContent || ''
     settings.screenshotMode = config.screenshotMode || 'window'
+    settings.kbPath = config.kbPath || ''
+    settings.sttModel = config.sttModel || 'base'
+    settings.sttDevice = config.sttDevice || 'auto'
 
     const opacity = config.opacity !== undefined ? config.opacity : 1.0
     settings.transparency = 1.0 - opacity
@@ -271,6 +277,9 @@ export const useSettingsStore = defineStore('settings', () => {
       noCompression: sourceSettings.noCompression,
       resumePath: sourceSettings.resumePath,
       resumeContent: sourceSettings.resumeContent,
+      kbPath: sourceSettings.kbPath,
+      sttModel: sourceSettings.sttModel,
+      sttDevice: sourceSettings.sttDevice,
       shortcuts: sourceShortcuts,
       theme: currentTheme.value,
     }

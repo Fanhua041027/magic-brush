@@ -7,6 +7,12 @@ import {
   GetModels,
   GetScreenshotPreview,
   GetSettings,
+  GetSTTStatus,
+  ToggleSTT,
+  GetKBStatus,
+  LoadKB,
+  SearchKB,
+  SetPendingUserMessage,
   MoveWindow,
   OpenScreenCaptureSettings,
   ParseResume,
@@ -72,4 +78,11 @@ export const api = {
   openScreenCaptureSettings: () => OpenScreenCaptureSettings(),
 
   saveImageToFile: (b64) => SaveImageToFile(b64),
+
+  getSTTStatus: () => GetSTTStatus(),
+  toggleSTT: () => ToggleSTT(),
+  getKBStatus: () => GetKBStatus(),
+  loadKB: (path) => LoadKB(path),
+  searchKB: (query) => SearchKB(query),
+  setUserMessage: (text) => SetPendingUserMessage(text),
 }

@@ -80,4 +80,16 @@ export function TriggerSend():Promise<void>;
 
 export function TriggerSolve():Promise<void>;
 
+export function GetSTTStatus():Promise<{[key:string]:boolean}>;
+
+export function ToggleSTT():Promise<{[key:string]:string}>;
+
+export function GetKBStatus():Promise<{[key:string]:any}>;
+
+export function LoadKB(arg1:string):Promise<{[key:string]:any}>;
+
+export function SearchKB(arg1:string):Promise<{[key:string]:any}>;
+
+export function SetPendingUserMessage(arg1:string):Promise<void>;
+
 export function UpdateSettings(arg1:string):Promise<string>;

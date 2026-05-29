@@ -5,6 +5,7 @@
   <SolveView v-else />
 
   <ScreenshotDock />
+  <KBPanel @select-result="onKBSelect" />
   <SettingsModal />
 
   <Teleport to="body">
@@ -32,7 +33,7 @@
     </div>
   </div>
 
-  <div class="disclaimer">Q-Solver 的回答仅供参考。</div>
+  <div class="disclaimer">AI-Assistant 的回答仅供参考。</div>
 
   <ResizeHandle />
 </template>
@@ -46,6 +47,7 @@ import ScreenshotDock from './components/ScreenshotDock.vue'
 import SettingsModal from './components/SettingsModal.vue'
 import ResizeHandle from './components/ResizeHandle.vue'
 import Icon from './components/Icon.vue'
+import KBPanel from './components/KBPanel.vue'
 
 import { useUIStore } from './stores/ui'
 import { useSettingsStore } from './stores/settings'
@@ -78,6 +80,10 @@ function continueSolve() {
     pendingSolveCallback()
     pendingSolveCallback = null
   }
+}
+
+function onKBSelect(item) {
+  console.log('KB selected:', item)
 }
 
 onMounted(() => {
