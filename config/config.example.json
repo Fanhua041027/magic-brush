@@ -1,0 +1,67 @@
+{
+  "apiKey": "",
+  "baseURL": "https://api.openai.com/v1",
+  "model": "",
+  "prompt": "",
+  "domainId": "general-assistant",
+  "opacity": 1,
+  "noCompression": false,
+  "compressionQuality": 92,
+  "sharpening": 0.3,
+  "grayscale": false,
+  "keepContext": false,
+  "interruptThinking": false,
+  "screenshotMode": "fullscreen",
+  "resumePath": "",
+  "resumeContent": "",
+  "assistantModel": "",
+  "windowWidth": 0,
+  "windowHeight": 0,
+  "theme": "light",
+  "shortcuts": {
+    "screenshot": {
+      "comboId": "119",
+      "keyName": "F8"
+    },
+    "send": {
+      "comboId": "74+162",
+      "keyName": "Ctrl+J"
+    },
+    "delete": {
+      "comboId": "68+162",
+      "keyName": "Ctrl+D"
+    },
+    "toggle": {
+      "comboId": "120",
+      "keyName": "F9"
+    },
+    "clickthrough": {
+      "comboId": "121",
+      "keyName": "F10"
+    },
+    "move_up": {
+      "comboId": "38+164",
+      "keyName": "Alt+Up"
+    },
+    "move_down": {
+      "comboId": "40+164",
+      "keyName": "Alt+Down"
+    },
+    "move_left": {
+      "comboId": "37+164",
+      "keyName": "Alt+Left"
+    },
+    "move_right": {
+      "comboId": "39+164",
+      "keyName": "Alt+Right"
+    },
+    "scroll_up": {
+      "comboId": "33+164",
+      "keyName": "Alt+PgUp"
+    },
+    "scroll_down": {
+      "comboId": "34+164",
+      "keyName": "Alt+PgDn"
+    }
+  }
+}
