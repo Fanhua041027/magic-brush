@@ -13,28 +13,60 @@ func (a *App) GetSTTStatus() map[string]bool {
 	return map[string]bool{"recording": status.Recording, "ready": true}
 }
 
-func (a *App) ToggleSTT() map[string]string {
+func (a *App) STTStart() map[string]string {
 	if a.sidecar == nil || !a.sidecar.IsRunning() {
 		return map[string]string{"error": "Sidecar not running"}
 	}
-
-	status, err := a.sidecar.Client().STTStatus()
-	if err != nil {
-		return map[string]string{"error": err.Error()}
-	}
-
-	if status.Recording {
-		result, err := a.sidecar.Client().STTStop()
-		if err != nil {
-			return map[string]string{"error": err.Error()}
-		}
-		return map[string]string{"text": result.Text, "status": "transcribed"}
-	}
-
 	if err := a.sidecar.Client().STTStart(); err != nil {
 		return map[string]string{"error": err.Error()}
 	}
 	return map[string]string{"status": "recording"}
+}
+
+func (a *App) STTStop() map[string]string {
+	if a.sidecar == nil || !a.sidecar.IsRunning() {
+		return map[string]string{"error": "Sidecar not running"}
+	}
+	result, err := a.sidecar.Client().STTStop()
+	if err != nil {
+		return map[string]string{"error": err.Error()}
+	}
+	return map[string]string{"text": result.Text, "status": "transcribed"}
+}
+
+func (a *App) ToggleSTT() map[string]string {
+	status, err := a.sidecar.Client().STTStatus()
+	if err != nil {
+		return map[string]string{"error": err.Error()}
+	}
+	if status.Recording {
+		return a.STTStop()
+	}
+	return a.STTStart()
+}
+
+func (a *App) StartSTTRecording() {
+	if a.sidecar == nil || !a.sidecar.IsRunning() {
+		return
+	}
+	a.sidecar.Client().STTStart()
+	a.EmitEvent("stt-recording-started")
+}
+
+func (a *App) StopSTTRecording() {
+	if a.sidecar == nil || !a.sidecar.IsRunning() {
+		return
+	}
+	result, err := a.sidecar.Client().STTStop()
+	if err != nil {
+		return
+	}
+	if result.Text != "" {
+		// Set the transcribed text as pending user message for next solve
+		a.SetPendingUserMessage(result.Text)
+		a.EmitEvent("stt-transcribed", result.Text)
+	}
+	a.EmitEvent("stt-recording-stopped")
 }
 
 // ── KB (Knowledge Base) bindings ──────────────────────────────────────

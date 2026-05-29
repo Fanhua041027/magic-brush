@@ -158,6 +158,14 @@ export function GetSTTStatus() {
   return window['go']['app']['App']['GetSTTStatus']();
 }
 
+export function STTStart() {
+  return window['go']['app']['App']['STTStart']();
+}
+
+export function STTStop() {
+  return window['go']['app']['App']['STTStop']();
+}
+
 export function ToggleSTT() {
   return window['go']['app']['App']['ToggleSTT']();
 }

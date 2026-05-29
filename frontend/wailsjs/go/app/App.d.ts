@@ -82,6 +82,10 @@ export function TriggerSolve():Promise<void>;
 
 export function GetSTTStatus():Promise<{[key:string]:boolean}>;
 
+export function STTStart():Promise<{[key:string]:string}>;
+
+export function STTStop():Promise<{[key:string]:string}>;
+
 export function ToggleSTT():Promise<{[key:string]:string}>;
 
 export function GetKBStatus():Promise<{[key:string]:any}>;

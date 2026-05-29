@@ -21,10 +21,16 @@ type Manager struct {
 	OnRecord            func(action string, keyName string, comboID string)
 	OnRecordingComplete func(action string, keyName string, comboID string)
 	OnError             func(msg string)
+	OnPushToTalkStart   func()
+	OnPushToTalkStop    func()
 
 	// Configuration
 	Shortcuts map[string]KeyBinding
 }
+
+const (
+	VK_LMENU = 164 // Left Alt
+)
 
 var globalManager *Manager
 
@@ -120,6 +126,25 @@ func keyboardHookProc(nCode int, wParam uintptr, lParam uintptr) uintptr {
 	if nCode >= 0 {
 		// 将 lParam 指针转换为键盘钩子结构体
 		kbd := (*platform.KBDLLHOOKSTRUCT)(unsafe.Pointer(lParam))
+
+		// Push-to-talk: Left Alt 长按录音
+		if kbd.VkCode == VK_LMENU {
+			if wParam == platform.WM_SYSKEYDOWN || wParam == platform.WM_KEYDOWN {
+				globalManager.heldKeys[kbd.VkCode] = true
+				if len(globalManager.heldKeys) == 1 && globalManager.OnPushToTalkStart != nil {
+					globalManager.OnPushToTalkStart()
+				}
+				return 1 // 吞掉 Left Alt，不传递给系统
+			}
+			if wParam == platform.WM_SYSKEYUP || wParam == platform.WM_KEYUP {
+				delete(globalManager.heldKeys, kbd.VkCode)
+				if globalManager.OnPushToTalkStop != nil {
+					globalManager.OnPushToTalkStop()
+				}
+				return 1
+			}
+		}
+
 		// 监听按下事件 (WM_KEYDOWN) 或 系统按键按下 (WM_SYSKEYDOWN，比如按住 Alt 时)
 		if wParam == platform.WM_KEYDOWN || wParam == platform.WM_SYSKEYDOWN {
 			globalManager.heldKeys[kbd.VkCode] = true

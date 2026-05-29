@@ -8,6 +8,8 @@ import {
   GetScreenshotPreview,
   GetSettings,
   GetSTTStatus,
+  STTStart,
+  STTStop,
   ToggleSTT,
   GetKBStatus,
   LoadKB,
@@ -80,6 +82,8 @@ export const api = {
   saveImageToFile: (b64) => SaveImageToFile(b64),
 
   getSTTStatus: () => GetSTTStatus(),
+  sttStart: () => STTStart(),
+  sttStop: () => STTStop(),
   toggleSTT: () => ToggleSTT(),
   getKBStatus: () => GetKBStatus(),
   loadKB: (path) => LoadKB(path),

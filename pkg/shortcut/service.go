@@ -24,6 +24,8 @@ func NewService(delegate ServiceDelegate, initialShortcuts map[string]KeyBinding
 	s.manager.OnRecord = s.handleRecord
 	s.manager.OnRecordingComplete = s.handleRecordingComplete
 	s.manager.OnError = func(msg string) {}
+	s.manager.OnPushToTalkStart = s.delegate.StartSTTRecording
+	s.manager.OnPushToTalkStop = s.delegate.StopSTTRecording
 
 	// 初始化快捷键
 	maps.Copy(s.manager.Shortcuts, initialShortcuts)

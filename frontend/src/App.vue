@@ -52,6 +52,7 @@ import KBPanel from './components/KBPanel.vue'
 import { useUIStore } from './stores/ui'
 import { useSettingsStore } from './stores/settings'
 import { useSolutionStore } from './stores/solution'
+import { useVoiceStore } from './stores/voice'
 import { on } from './services/events'
 import { api } from './services/api'
 import { initCodeBlockInteractions } from './utils/markdown-latex'
@@ -59,6 +60,7 @@ import { initCodeBlockInteractions } from './utils/markdown-latex'
 const ui = useUIStore()
 const settingsStore = useSettingsStore()
 const solution = useSolutionStore()
+const voice = useVoiceStore()
 
 let pendingSolveCallback = null
 
@@ -249,6 +251,20 @@ onMounted(() => {
       }
     }
   }
+
+  on('stt-recording-started', () => {
+    voice.isRecording = true
+    voice.transcribedText = ''
+  })
+
+  on('stt-transcribed', (text) => {
+    voice.isRecording = false
+    voice.transcribedText = text || ''
+  })
+
+  on('stt-recording-stopped', () => {
+    voice.isRecording = false
+  })
 
   on('require-api-key', () => {
     if (!ui.showSettings) settingsStore.openSettings()

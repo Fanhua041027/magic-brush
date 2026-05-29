@@ -28,7 +28,6 @@ export const useVoiceStore = defineStore('voice', () => {
       } else if (result.status === 'transcribed') {
         isRecording.value = false
         transcribedText.value = result.text || ''
-        // Auto-set as pending user message for next solve
         if (result.text) {
           api.setUserMessage(result.text)
         }
@@ -42,5 +41,38 @@ export const useVoiceStore = defineStore('voice', () => {
     }
   }
 
-  return { isRecording, isTranscribing, isReady, transcribedText, checkStatus, toggle }
+  async function start() {
+    if (isRecording.value || isTranscribing.value) return
+    transcribedText.value = ''
+    try {
+      const result = await api.sttStart()
+      if (result.status === 'recording') {
+        isRecording.value = true
+      }
+    } catch (e) {
+      console.error('STT start error:', e)
+    }
+  }
+
+  async function stop() {
+    if (!isRecording.value || isTranscribing.value) return
+    isTranscribing.value = true
+    try {
+      const result = await api.sttStop()
+      isRecording.value = false
+      isTranscribing.value = false
+      if (result.status === 'transcribed') {
+        transcribedText.value = result.text || ''
+        if (result.text) {
+          api.setUserMessage(result.text)
+        }
+      }
+    } catch (e) {
+      isRecording.value = false
+      isTranscribing.value = false
+      console.error('STT stop error:', e)
+    }
+  }
+
+  return { isRecording, isTranscribing, isReady, transcribedText, checkStatus, toggle, start, stop }
 })

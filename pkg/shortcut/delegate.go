@@ -11,4 +11,6 @@ type ServiceDelegate interface {
 	MoveWindow(dx, dy int)
 	ScrollContent(direction string)
 	EmitEvent(eventName string, data ...interface{})
+	StartSTTRecording()
+	StopSTTRecording()
 }
