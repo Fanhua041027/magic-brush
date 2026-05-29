@@ -1,0 +1,5 @@
+flask>=3.0
+sounddevice>=0.5
+numpy>=1.26
+faster-whisper>=1.1
+zhconv>=1.4
