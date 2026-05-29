@@ -10,12 +10,14 @@ from flask import Flask, jsonify, request
 
 from audio import AudioRecorder
 from transcribe import Transcriber
+from knowledge_base import KnowledgeBase
 
 app = Flask(__name__)
 
 # Global state
 recorder: AudioRecorder | None = None
 transcriber: Transcriber | None = None
+kb: KnowledgeBase | None = None
 recording_lock = threading.Lock()
 is_recording = False
 
@@ -88,16 +90,36 @@ def stt_record():
         return jsonify({"error": str(e)}), 500
 
 
-# ── KB (Knowledge Base) — placeholder, implemented in Step 3 ────────────
+# ── KB (Knowledge Base) ─────────────────────────────────────────────
 
 @app.route("/api/kb/search", methods=["POST"])
 def kb_search():
-    return jsonify({"results": [], "message": "KB not loaded"})
+    global kb
+    if kb is None or not kb.ready:
+        return jsonify({"results": [], "error": "KB not loaded"}), 400
+    data = request.get_json(silent=True) or {}
+    query = data.get("query", "")
+    top_k = data.get("top_k", 5)
+    if not query:
+        return jsonify({"results": []})
+    results = kb.search(query, top_k=top_k)
+    return jsonify({"results": results})
 
 
 @app.route("/api/kb/load", methods=["POST"])
 def kb_load():
-    return jsonify({"status": "ok", "file_count": 0, "section_count": 0})
+    global kb
+    data = request.get_json(silent=True) or {}
+    path = data.get("path", "")
+    if not path or not os.path.isdir(path):
+        return jsonify({"error": f"Invalid path: {path}"}), 400
+    try:
+        if kb is None:
+            kb = KnowledgeBase()
+        result = kb.load(path)
+        return jsonify({"status": "ok", **result})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 # ── Main ───────────────────────────────────────────────────────────────
