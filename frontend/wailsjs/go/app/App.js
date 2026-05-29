@@ -158,6 +158,14 @@ export function GetSTTStatus() {
   return window['go']['app']['App']['GetSTTStatus']();
 }
 
+export function GetSTTDevices() {
+  return window['go']['app']['App']['GetSTTDevices']();
+}
+
+export function SetSTTDevice(arg1) {
+  return window['go']['app']['App']['SetSTTDevice'](arg1);
+}
+
 export function STTStart() {
   return window['go']['app']['App']['STTStart']();
 }
@@ -196,4 +204,20 @@ export function SetPendingUserMessage(arg1) {
 
 export function UpdateSettings(arg1) {
   return window['go']['app']['App']['UpdateSettings'](arg1);
+}
+
+export function ChatWithDeepSeek(arg1) {
+  return window['go']['app']['App']['ChatWithDeepSeek'](arg1);
+}
+
+export function ChatWithDeepSeekStream(arg1) {
+  return window['go']['app']['App']['ChatWithDeepSeekStream'](arg1);
+}
+
+export function ChatWithDeepSeekStreamWithContext(arg1) {
+  return window['go']['app']['App']['ChatWithDeepSeekStreamWithContext'](arg1);
+}
+
+export function ChatWithScreenshot(arg1, arg2, arg3) {
+  return window['go']['app']['App']['ChatWithScreenshot'](arg1, arg2, arg3);
 }

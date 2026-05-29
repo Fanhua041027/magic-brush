@@ -322,7 +322,7 @@ export const useSolutionStore = defineStore('solution', () => {
       rounds.forEach((round, idx) => container.appendChild(createRoundCard(round, idx, rounds.length)))
       const footer = document.createElement('div')
       footer.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-top:20px;padding-top:14px;border-top:1px solid #cbd5e1;font-size:11px;color:#64748b;'
-      footer.innerHTML = `<div style="display:flex;align-items:center;gap:6px;"><span style="font-weight:600;">Q-Solver</span></div><div>${new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' })}</div>`
+      footer.innerHTML = `<div style="display:flex;align-items:center;gap:6px;"><span style="font-weight:600;">Magic Brush</span></div><div>${new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' })}</div>`
       container.appendChild(footer)
       document.body.appendChild(container)
       const canvas = await html2canvas(container, { backgroundColor: null, scale: 2, useCORS: true, logging: false })

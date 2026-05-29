@@ -7,6 +7,8 @@
   <ScreenshotDock />
   <KBPanel @select-result="onKBSelect" />
   <SettingsModal />
+  <ChatDialog />
+  <ScreenshotFollowUp ref="followUpRef" />
 
   <Teleport to="body">
     <Transition name="overlay-fade">
@@ -39,7 +41,7 @@
 </template>
 
 <script setup>
-import { onMounted } from 'vue'
+import { onMounted, ref } from 'vue'
 import TopBar from './components/TopBar.vue'
 import WelcomeView from './components/WelcomeView.vue'
 import SolveView from './components/SolveView.vue'
@@ -48,11 +50,14 @@ import SettingsModal from './components/SettingsModal.vue'
 import ResizeHandle from './components/ResizeHandle.vue'
 import Icon from './components/Icon.vue'
 import KBPanel from './components/KBPanel.vue'
+import ChatDialog from './components/ChatDialog.vue'
+import ScreenshotFollowUp from './components/ScreenshotFollowUp.vue'
 
 import { useUIStore } from './stores/ui'
 import { useSettingsStore } from './stores/settings'
 import { useSolutionStore } from './stores/solution'
 import { useVoiceStore } from './stores/voice'
+import { useChatStore } from './stores/chat'
 import { on } from './services/events'
 import { api } from './services/api'
 import { initCodeBlockInteractions } from './utils/markdown-latex'
@@ -61,8 +66,11 @@ const ui = useUIStore()
 const settingsStore = useSettingsStore()
 const solution = useSolutionStore()
 const voice = useVoiceStore()
+const chatStore = useChatStore()
 
+const followUpRef = ref(null)
 let pendingSolveCallback = null
+let currentScreenshot = null
 
 function toastIcon(type) {
   if (type === 'error') return 'x-circle'
@@ -137,7 +145,10 @@ onMounted(() => {
     }
   })
 
-  on('user-message', (screenshot) => solution.setUserScreenshot(screenshot))
+  on('user-message', (screenshot) => {
+    solution.setUserScreenshot(screenshot)
+    currentScreenshot = screenshot
+  })
 
   on('start-solving', () => {
     const s = settingsStore.settings
@@ -180,6 +191,13 @@ onMounted(() => {
     settingsStore.statusText = '解题完成'
     settingsStore.statusIcon = '✓'
     solution.handleSolution(data)
+    // 解题完成后显示追问对话框
+    if (currentScreenshot && followUpRef.value) {
+      setTimeout(() => {
+        followUpRef.value.show(currentScreenshot, data, '')
+        currentScreenshot = null
+      }, 500)
+    }
   })
 
   on('copy-code', () => {
@@ -260,6 +278,10 @@ onMounted(() => {
   on('stt-transcribed', (text) => {
     voice.isRecording = false
     voice.transcribedText = text || ''
+    // 语音转写后自动打开对话框
+    if (text && text.trim()) {
+      chatStore.show()
+    }
   })
 
   on('stt-recording-stopped', () => {
@@ -279,6 +301,10 @@ onMounted(() => {
 
   on('toast', (msg) => {
     ui.showToast(msg)
+  })
+
+  on('open-chat', () => {
+    chatStore.show()
   })
 
   document.addEventListener('keydown', event => {

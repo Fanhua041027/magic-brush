@@ -1,18 +1,18 @@
 {
   "$schema": "https://wails.io/schemas/config.v2.json",
-  "name": "AI-Assistant",
-  "outputfilename": "AI-Assistant",
+  "name": "Magic Brush",
+  "outputfilename": "ShenbiMaliang",
   "frontend:install": "npm install",
   "frontend:build": "npm run build",
   "frontend:dev:watcher": "npm run dev",
   "frontend:dev:serverUrl": "auto",
   "info": {
-    "companyName": "AI-Assistant",
-    "productName": "AI-Assistant",
+    "companyName": "Magic Brush",
+    "productName": "Magic Brush",
     "productVersion": "1.0.0.0",
-    "copyright": "Copyright 2026 AI-Assistant contributors.",
-    "comments": "Unified AI Interview Assistant with Voice STT + KB Search + LLM Solving",
+    "copyright": "Copyright 2026 Magic Brush contributors.",
+    "comments": "AI 智能助手 - 截图解题 + 语音转写 + 知识库搜索",
     "fileVersion": "1.0.0.0",
-    "fileDescription": "AI-Assistant Desktop Application"
+    "fileDescription": "Magic Brush Desktop Application"
   }
 }

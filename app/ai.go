@@ -52,6 +52,53 @@ func (a *App) ToggleSTT() map[string]string {
 	return a.STTStart()
 }
 
+func (a *App) GetSTTDevices() map[string]interface{} {
+	if a.sidecar == nil || !a.sidecar.IsRunning() {
+		return map[string]interface{}{"error": "Sidecar not running"}
+	}
+	result, err := a.sidecar.Client().STTDevices()
+	if err != nil {
+		return map[string]interface{}{"error": err.Error()}
+	}
+	devices := make([]map[string]interface{}, 0, len(result.Devices))
+	for _, d := range result.Devices {
+		devices = append(devices, map[string]interface{}{
+			"id":                d.ID,
+			"name":              d.Name,
+			"channels":          d.Channels,
+			"default_samplerate": d.DefaultSamplerate,
+			"host_api":          d.HostAPI,
+			"is_default":        d.IsDefault,
+		})
+	}
+	out := map[string]interface{}{
+		"devices":             devices,
+		"current_sample_rate": result.CurrentSampleRate,
+	}
+	if result.CurrentDeviceID != nil {
+		out["current_device_id"] = *result.CurrentDeviceID
+	}
+	return out
+}
+
+func (a *App) SetSTTDevice(deviceID int) map[string]interface{} {
+	if a.sidecar == nil || !a.sidecar.IsRunning() {
+		return map[string]interface{}{"error": "Sidecar not running"}
+	}
+	result, err := a.sidecar.Client().STTSetDevice(deviceID)
+	if err != nil {
+		return map[string]interface{}{"error": err.Error()}
+	}
+	out := map[string]interface{}{
+		"status":      result.Status,
+		"sample_rate": result.SampleRate,
+	}
+	if result.DeviceID != nil {
+		out["device_id"] = *result.DeviceID
+	}
+	return out
+}
+
 func (a *App) StartSTTRecording() {
 	if a.sidecar == nil || !a.sidecar.IsRunning() {
 		return

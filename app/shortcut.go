@@ -21,3 +21,8 @@ func (a *App) ScrollContent(direction string) {
 func (a *App) CopyCode() {
 	a.EmitEvent("copy-code")
 }
+
+// OpenChat 打开对话框
+func (a *App) OpenChat() {
+	a.EmitEvent("open-chat")
+}

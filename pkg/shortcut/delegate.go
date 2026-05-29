@@ -13,4 +13,5 @@ type ServiceDelegate interface {
 	EmitEvent(eventName string, data ...interface{})
 	StartSTTRecording()
 	StopSTTRecording()
+	OpenChat()
 }

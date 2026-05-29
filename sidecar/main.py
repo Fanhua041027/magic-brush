@@ -31,6 +31,39 @@ def health():
 
 # ── STT (Speech-to-Text) ───────────────────────────────────────────────
 
+@app.route("/api/stt/devices", methods=["GET"])
+def stt_devices():
+    from audio import list_input_devices, get_device_config
+    devices = list_input_devices()
+    current_device, current_rate = get_device_config()
+    return jsonify({
+        "devices": devices,
+        "current_device_id": current_device,
+        "current_sample_rate": current_rate,
+    })
+
+
+@app.route("/api/stt/device", methods=["POST"])
+def stt_set_device():
+    global recorder
+    data = request.get_json(silent=True) or {}
+    device_id = data.get("device_id")
+    if device_id is not None:
+        try:
+            device_id = int(device_id)
+        except (ValueError, TypeError):
+            return jsonify({"error": "Invalid device_id"}), 400
+    if recorder is None:
+        return jsonify({"error": "Audio recorder not initialized"}), 500
+    try:
+        recorder.reopen(device_id)
+        from audio import get_device_config
+        curr_dev, curr_rate = get_device_config()
+        return jsonify({"status": "ok", "device_id": curr_dev, "sample_rate": curr_rate})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/api/stt/status", methods=["GET"])
 def stt_status():
     return jsonify({"recording": is_recording})

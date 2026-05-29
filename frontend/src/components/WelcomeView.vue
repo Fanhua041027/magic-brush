@@ -4,14 +4,14 @@
       <!-- Logo -->
       <div class="logo-section">
         <div class="logo-badge">
-          <span class="logo-letter">Q</span>
+          <span class="logo-letter">M</span>
         </div>
         <div class="logo-glow"></div>
       </div>
 
       <!-- Title -->
       <div class="title-section">
-        <h1 class="main-title">Q-SOLVER</h1>
+        <h1 class="main-title">Magic Brush</h1>
         <p class="subtitle">AI 智能助手 · 即刻开始</p>
       </div>
 

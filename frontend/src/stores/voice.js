@@ -7,6 +7,8 @@ export const useVoiceStore = defineStore('voice', () => {
   const isTranscribing = ref(false)
   const isReady = ref(false)
   const transcribedText = ref('')
+  const devices = ref([])
+  const selectedDeviceId = ref(null)
 
   async function checkStatus() {
     try {
@@ -15,6 +17,36 @@ export const useVoiceStore = defineStore('voice', () => {
       isReady.value = status.ready || false
     } catch (e) {
       isReady.value = false
+    }
+  }
+
+  async function loadDevices() {
+    try {
+      const result = await api.getSTTDevices()
+      if (result.devices) {
+        devices.value = result.devices
+        if (result.current_device_id != null) {
+          selectedDeviceId.value = result.current_device_id
+        } else {
+          const def = result.devices.find(d => d.is_default)
+          if (def) selectedDeviceId.value = def.id
+        }
+      }
+    } catch (e) {
+      console.error('Failed to load STT devices:', e)
+    }
+  }
+
+  async function changeDevice() {
+    if (selectedDeviceId.value == null) return
+    try {
+      const result = await api.setSTTDevice(selectedDeviceId.value)
+      if (result.error) {
+        console.error('Device switch error:', result.error)
+        await loadDevices()
+      }
+    } catch (e) {
+      console.error('Failed to set STT device:', e)
     }
   }
 
@@ -63,9 +95,7 @@ export const useVoiceStore = defineStore('voice', () => {
       isTranscribing.value = false
       if (result.status === 'transcribed') {
         transcribedText.value = result.text || ''
-        if (result.text) {
-          api.setUserMessage(result.text)
-        }
+        // 语音转写结果会通过事件触发对话框显示
       }
     } catch (e) {
       isRecording.value = false
@@ -74,5 +104,5 @@ export const useVoiceStore = defineStore('voice', () => {
     }
   }
 
-  return { isRecording, isTranscribing, isReady, transcribedText, checkStatus, toggle, start, stop }
+  return { isRecording, isTranscribing, isReady, transcribedText, devices, selectedDeviceId, checkStatus, loadDevices, changeDevice, toggle, start, stop }
 })

@@ -12,12 +12,17 @@
       <div class="bar-right" style="--wails-draggable: no-drag">
         <STTButton />
 
+        <button class="bar-btn chat-btn" @click="chatStore.toggle()" title="AI 对话 (F7)">
+          <Icon name="message-square" :size="15" />
+        </button>
+
         <div class="bar-divider" />
 
         <div class="shortcuts-hint">
           <kbd>{{ settingsStore.solveShortcut }}</kbd>
           <kbd>{{ settingsStore.sendShortcut }}</kbd>
           <kbd>{{ settingsStore.toggleShortcut }}</kbd>
+          <kbd>F7</kbd>
         </div>
 
         <div class="bar-divider" />
@@ -85,6 +90,7 @@
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { useUIStore } from '../stores/ui'
 import { useSettingsStore } from '../stores/settings'
+import { useChatStore } from '../stores/chat'
 import Icon from './Icon.vue'
 import ThemeToggle from './ThemeToggle.vue'
 import STTButton from './STTButton.vue'
@@ -93,6 +99,7 @@ defineEmits(['openSettings'])
 
 const ui = useUIStore()
 const settingsStore = useSettingsStore()
+const chatStore = useChatStore()
 
 const statusClass = computed(() => {
   const text = settingsStore.statusText || ''
@@ -270,6 +277,12 @@ function showSettingsTooltip() {
   color: var(--text-primary);
 }
 .bar-btn-quit:hover { color: var(--color-error); }
+.chat-btn {
+  position: relative;
+}
+.chat-btn:hover {
+  color: var(--accent);
+}
 .status-dot {
   width: 8px;
   height: 8px;

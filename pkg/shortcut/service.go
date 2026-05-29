@@ -85,6 +85,9 @@ func (s *Service) handleTrigger(action string) {
 	case "clickthrough":
 		logger.Println("切换鼠标穿透")
 		s.delegate.ToggleClickThrough()
+	case "chat":
+		logger.Println("打开对话框")
+		s.delegate.OpenChat()
 	case "move_up":
 		s.delegate.MoveWindow(0, -10)
 	case "move_down":

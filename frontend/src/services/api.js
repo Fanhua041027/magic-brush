@@ -8,6 +8,8 @@ import {
   GetScreenshotPreview,
   GetSettings,
   GetSTTStatus,
+  GetSTTDevices,
+  SetSTTDevice,
   STTStart,
   STTStop,
   ToggleSTT,
@@ -38,6 +40,10 @@ import {
   RemoveScreenshot,
   ClearScreenshots,
   UpdateSettings,
+  ChatWithDeepSeek,
+  ChatWithDeepSeekStream,
+  ChatWithDeepSeekStreamWithContext,
+  ChatWithScreenshot,
 } from '../../wailsjs/go/app/App'
 
 import { Quit } from '../../wailsjs/runtime/runtime'
@@ -84,6 +90,8 @@ export const api = {
   saveImageToFile: (b64) => SaveImageToFile(b64),
 
   getSTTStatus: () => GetSTTStatus(),
+  getSTTDevices: () => GetSTTDevices(),
+  setSTTDevice: (id) => SetSTTDevice(id),
   sttStart: () => STTStart(),
   sttStop: () => STTStop(),
   toggleSTT: () => ToggleSTT(),
@@ -93,4 +101,9 @@ export const api = {
   selectKBDirectory: () => SelectKBDirectory(),
   clearKB: () => ClearKB(),
   setUserMessage: (text) => SetPendingUserMessage(text),
+
+  chatWithDeepSeek: (message) => ChatWithDeepSeek(message),
+  chatWithDeepSeekStream: (message) => ChatWithDeepSeekStream(message),
+  chatWithDeepSeekStreamWithContext: (messages) => ChatWithDeepSeekStreamWithContext(messages),
+  chatWithScreenshot: (message, screenshot, context) => ChatWithScreenshot(message, screenshot, context),
 }

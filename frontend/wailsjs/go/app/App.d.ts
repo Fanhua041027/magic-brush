@@ -82,6 +82,10 @@ export function TriggerSolve():Promise<void>;
 
 export function GetSTTStatus():Promise<{[key:string]:boolean}>;
 
+export function GetSTTDevices():Promise<{[key:string]:any}>;
+
+export function SetSTTDevice(arg1:number):Promise<{[key:string]:any}>;
+
 export function STTStart():Promise<{[key:string]:string}>;
 
 export function STTStop():Promise<{[key:string]:string}>;
@@ -101,3 +105,11 @@ export function ClearKB():Promise<void>;
 export function SetPendingUserMessage(arg1:string):Promise<void>;
 
 export function UpdateSettings(arg1:string):Promise<string>;
+
+export function ChatWithDeepSeek(arg1:string):Promise<string>;
+
+export function ChatWithDeepSeekStream(arg1:string):Promise<void>;
+
+export function ChatWithDeepSeekStreamWithContext(arg1:Array<{[key:string]:string}>):Promise<void>;
+
+export function ChatWithScreenshot(arg1:string,arg2:string,arg3:string):Promise<void>;

@@ -108,6 +108,7 @@ func getDefaultShortcuts() map[string]shortcut.KeyBinding {
 		"delete":       {ComboID: "68+162", KeyName: "Ctrl+D"},
 		"toggle":       {ComboID: "120", KeyName: "F9"},
 		"clickthrough": {ComboID: "121", KeyName: "F10"},
+		"chat":         {ComboID: "118", KeyName: "F7"},
 		"move_up":      {ComboID: "38+164", KeyName: "Alt+↑"},
 		"move_down":    {ComboID: "40+164", KeyName: "Alt+↓"},
 		"move_left":    {ComboID: "37+164", KeyName: "Alt+←"},

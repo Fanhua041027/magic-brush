@@ -12,7 +12,7 @@ import (
 
 const (
 	defaultPort = 18765
-	startTimeout = 30 * time.Second
+	startTimeout = 120 * time.Second // 增加到 120 秒，因为首次需要下载模型
 	healthInterval = 500 * time.Millisecond
 )
 
@@ -34,6 +34,29 @@ type STTStatus struct {
 type STTResult struct {
 	Text  string `json:"text"`
 	Error string `json:"error,omitempty"`
+}
+
+type STTDeviceInfo struct {
+	ID               int    `json:"id"`
+	Name             string `json:"name"`
+	Channels         int    `json:"channels"`
+	DefaultSamplerate int   `json:"default_samplerate"`
+	HostAPI          string `json:"host_api"`
+	IsDefault        bool   `json:"is_default"`
+}
+
+type STTDevicesResult struct {
+	Devices           []STTDeviceInfo `json:"devices"`
+	CurrentDeviceID   *int            `json:"current_device_id"`
+	CurrentSampleRate int             `json:"current_sample_rate"`
+	Error             string          `json:"error,omitempty"`
+}
+
+type STTSetDeviceResult struct {
+	Status     string `json:"status"`
+	DeviceID   *int   `json:"device_id"`
+	SampleRate int    `json:"sample_rate"`
+	Error      string `json:"error,omitempty"`
 }
 
 type KBLoadResult struct {
@@ -118,6 +141,36 @@ func (c *Client) STTStatus() (*STTStatus, error) {
 		return nil, err
 	}
 	return &status, nil
+}
+
+func (c *Client) STTDevices() (*STTDevicesResult, error) {
+	resp, err := c.http.Get(c.baseURL + "/api/stt/devices")
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	var result STTDevicesResult
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+func (c *Client) STTSetDevice(deviceID int) (*STTSetDeviceResult, error) {
+	body, _ := json.Marshal(map[string]int{"device_id": deviceID})
+	resp, err := c.http.Post(c.baseURL+"/api/stt/device", "application/json", bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	var result STTSetDeviceResult
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, err
+	}
+	if resp.StatusCode != 200 && result.Error != "" {
+		return nil, fmt.Errorf("STT set device error: %s", result.Error)
+	}
+	return &result, nil
 }
 
 func (c *Client) KBLoad(path string) (*KBLoadResult, error) {

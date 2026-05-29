@@ -142,6 +142,7 @@ async function doSearch() {
 .kb-panel {
   border-top: 1px solid var(--border-default);
   background: var(--surface-base);
+  pointer-events: auto;
 }
 .kb-header {
   display: flex;

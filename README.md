@@ -1,11 +1,11 @@
-# AI-Assistant
+# Magic Brush
 
 [![Go](https://img.shields.io/badge/Go-1.24+-00ADD8?logo=go)](https://go.dev)
 [![Vue 3](https://img.shields.io/badge/Vue-3.x-4FC08D?logo=vue.js)](https://vuejs.org)
 [![Wails v2](https://img.shields.io/badge/Wails-v2-E30613)](https://wails.io)
 [![Python](https://img.shields.io/badge/Python-3.11+-3776AB?logo=python)](https://python.org)
 
-**AI-Assistant** 是一个融合了截图解题 + 语音转写 + 知识库搜索的 AI 桌面助手，基于 Wails (Go+Vue) 构建。
+**Magic Brush** 是一个融合了截图解题 + 语音转写 + 知识库搜索的 AI 桌面助手，基于 Wails (Go+Vue) 构建。
 
 ---
 
@@ -51,8 +51,28 @@ wails dev -skipbindings
 | 截图 | F8 | Cmd+1 |
 | 发送解题 | Ctrl+J | Cmd+J |
 | 显示/隐藏 | F9 | Cmd+2 |
-| 语音输入 | Alt+Q | - |
+| 语音输入 | 左Alt (按住说话) | - |
+| AI 对话 | F7 | - |
 | 鼠标穿透 | F10 | Cmd+3 |
+
+## 功能特性
+
+### 知识库集成
+- 对话时自动搜索知识库
+- 基于 TF-IDF 算法的相关性匹配
+- 支持 Markdown 文件格式
+
+### 简历集成
+- 支持上传简历文件（PDF/Word）
+- AI 对话时自动加载简历内容
+- 根据简历信息回答相关问题
+- 状态栏显示简历加载状态
+
+### 截图追问
+- 截图解题后自动弹出追问对话框
+- 支持语音输入追问内容
+- 保持上下文关联
+- 支持多轮对话
 
 ## 架构
 
