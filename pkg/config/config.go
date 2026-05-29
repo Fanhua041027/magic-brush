@@ -33,6 +33,13 @@ type Config struct {
 
 	// 主题（light / dark）
 	Theme string `json:"theme,omitempty"`
+
+	// STT 语音转写
+	STTModel  string `json:"sttModel,omitempty"`
+	STTDevice string `json:"sttDevice,omitempty"`
+
+	// 知识库
+	KBPath string `json:"kbPath,omitempty"`
 }
 
 const DefaultModel = ""
@@ -66,6 +73,13 @@ func NewDefaultConfig() Config {
 
 		// 主题默认值
 		Theme: "light",
+
+		// STT
+		STTModel:  "base",
+		STTDevice: "auto",
+
+		// 知识库
+		KBPath: "",
 	}
 }
 

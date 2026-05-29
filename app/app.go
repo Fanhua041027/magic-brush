@@ -7,6 +7,7 @@ import (
 	"ai-assistant/pkg/resume"
 	"ai-assistant/pkg/screen"
 	"ai-assistant/pkg/shortcut"
+	"ai-assistant/pkg/sidecar"
 	"ai-assistant/pkg/solution"
 	"ai-assistant/pkg/state"
 	"ai-assistant/pkg/task"
@@ -27,6 +28,7 @@ type App struct {
 	shortcutService *shortcut.Service
 	screenService   *screen.Service
 	solver          *solution.Solver
+	sidecar         *sidecar.Manager
 }
 
 func NewApp() *App {
@@ -68,6 +70,21 @@ func (a *App) Startup(ctx context.Context) {
 	})
 	a.shortcutService.Start()
 
+	// Start Python sidecar
+	a.sidecar = sidecar.NewManager(18765)
+	go func() {
+		if err := a.sidecar.Start(cfg.STTModel, cfg.STTDevice); err != nil {
+			logger.Printf("[Sidecar] Start failed: %v", err)
+		} else if cfg.KBPath != "" {
+			result, err := a.sidecar.Client().KBLoad(cfg.KBPath)
+			if err != nil {
+				logger.Printf("[Sidecar] KB load failed: %v", err)
+			} else {
+				logger.Printf("[Sidecar] KB loaded: %d files, %d sections", result.FileCount, result.SectionCount)
+			}
+		}
+	}()
+
 	a.configManager.Subscribe(a.onConfigChanged)
 	a.stateManager.UpdateInitStatus(state.StatusReady)
 }
@@ -84,12 +101,27 @@ func (a *App) onConfigChanged(newConfig config.Config, oldConfig config.Config) 
 		a.solver.ClearHistory()
 	}
 
+	// Reload KB if path changed
+	if newConfig.KBPath != oldConfig.KBPath && a.sidecar != nil && a.sidecar.IsRunning() {
+		if newConfig.KBPath != "" {
+			result, err := a.sidecar.Client().KBLoad(newConfig.KBPath)
+			if err != nil {
+				logger.Printf("[Sidecar] KB reload failed: %v", err)
+			} else {
+				logger.Printf("[Sidecar] KB reloaded: %d files, %d sections", result.FileCount, result.SectionCount)
+			}
+		}
+	}
+
 	logger.Println("配置已更新并应用")
 }
 
 func (a *App) OnShutdown(ctx context.Context) {
 	if a.shortcutService != nil {
 		a.shortcutService.Stop()
+	}
+	if a.sidecar != nil {
+		a.sidecar.Stop()
 	}
 	if err := a.configManager.Save(); err != nil {
 		logger.Printf("保存配置失败: %v", err)
