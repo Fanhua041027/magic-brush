@@ -117,11 +117,20 @@ func (a *App) SetSTTDeviceByName(deviceName string) map[string]interface{} {
 }
 
 func (a *App) StartSTTRecording() {
-	if a.sidecar == nil || !a.sidecar.IsRunning() {
+	if a.sidecar == nil {
+		logger.Println("[STT] StartSTTRecording: sidecar is nil")
+		return
+	}
+	if !a.sidecar.IsRunning() {
+		logger.Println("[STT] StartSTTRecording: sidecar not running")
 		return
 	}
 	// 使用流式转写
-	a.sidecar.Client().STTStartStreaming()
+	if err := a.sidecar.Client().STTStartStreaming(); err != nil {
+		logger.Printf("[STT] StartSTTRecording: streaming start failed: %v", err)
+		return
+	}
+	logger.Println("[STT] StartSTTRecording: streaming started")
 	a.EmitEvent("stt-recording-started")
 
 	// 启动轮询流式结果的 goroutine
@@ -129,13 +138,21 @@ func (a *App) StartSTTRecording() {
 }
 
 func (a *App) StopSTTRecording() {
-	if a.sidecar == nil || !a.sidecar.IsRunning() {
+	if a.sidecar == nil {
+		logger.Println("[STT] StopSTTRecording: sidecar is nil")
 		return
 	}
+	if !a.sidecar.IsRunning() {
+		logger.Println("[STT] StopSTTRecording: sidecar not running")
+		return
+	}
+	logger.Println("[STT] StopSTTRecording: calling STTStop")
 	result, err := a.sidecar.Client().STTStop()
 	if err != nil {
+		logger.Printf("[STT] StopSTTRecording: STTStop failed: %v", err)
 		return
 	}
+	logger.Printf("[STT] StopSTTRecording: text=%q", result.Text)
 	if result.Text != "" {
 		// 将识别结果发送到 AI 对话输入框
 		a.EmitEvent("stt-transcribed", result.Text)

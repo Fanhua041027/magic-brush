@@ -20,6 +20,7 @@ func (m *Manager) Start(model, device, language string, sensitivity float64, stt
 	// Check if already running
 	if err := m.client.Health(); err == nil {
 		logger.Printf("[Sidecar] Already running on port %d", m.port)
+		m.externalRunning = true
 		return nil
 	}
 
@@ -74,6 +75,9 @@ func (m *Manager) Client() *Client {
 }
 
 func (m *Manager) IsRunning() bool {
+	if m.externalRunning {
+		return m.client.Health() == nil
+	}
 	if m.cmd == nil || m.cmd.Process == nil {
 		return false
 	}

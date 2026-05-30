@@ -17,9 +17,10 @@ const (
 )
 
 type Manager struct {
-	port   int
-	cmd    *exec.Cmd
-	client *Client
+	port            int
+	cmd             *exec.Cmd
+	client          *Client
+	externalRunning bool
 }
 
 type Client struct {

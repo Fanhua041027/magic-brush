@@ -12,31 +12,47 @@ WHISPER_RATE = 16000
 CHANNELS = 1
 
 
+def _get_device_attr(dev, attr):
+    """兼容 dict 和对象两种 sounddevice 返回格式"""
+    if isinstance(dev, dict):
+        return dev.get(attr)
+    return getattr(dev, attr, None)
+
+
 def list_input_devices() -> list[dict[str, Any]]:
     """List all available audio input devices."""
     devices = []
     try:
         default_id = sd.default.device[0]
-        for i, dev in enumerate(sd.query_devices()):
-            if dev["max_input_channels"] > 0:
-                name = dev["name"]
-                # 标记特殊设备类型
-                device_type = "mic"
-                if "立体声混音" in name or "Stereo Mix" in name:
-                    device_type = "stereo_mix"
-                elif "麦克风" in name or "Microphone" in name:
+        all_devices = sd.query_devices()
+        host_apis = sd.query_hostapis()
+        for i, dev in enumerate(all_devices):
+            max_input = _get_device_attr(dev, "max_input_channels")
+            if max_input and max_input > 0:
+                try:
+                    name = str(_get_device_attr(dev, "name"))
+                    # 标记特殊设备类型
                     device_type = "mic"
-                devices.append({
-                    "id": i,
-                    "name": name,
-                    "type": device_type,
-                    "channels": dev["max_input_channels"],
-                    "default_samplerate": int(dev["default_samplerate"]),
-                    "host_api": sd.query_hostapis(dev["host_api"])["name"],
-                    "is_default": i == default_id,
-                })
-    except Exception:
-        pass
+                    if "立体声混音" in name or "Stereo Mix" in name:
+                        device_type = "stereo_mix"
+                    elif "麦克风" in name or "Microphone" in name:
+                        device_type = "mic"
+                    host_api_idx = _get_device_attr(dev, "host_api")
+                    host_api = host_apis[host_api_idx]["name"] if host_api_idx is not None else "unknown"
+                    devices.append({
+                        "id": i,
+                        "name": name,
+                        "type": device_type,
+                        "channels": max_input,
+                        "default_samplerate": int(_get_device_attr(dev, "default_samplerate") or 16000),
+                        "host_api": host_api,
+                        "is_default": i == default_id,
+                    })
+                except Exception as e:
+                    print(f"[Audio] Error processing device {i}: {e}")
+                    continue
+    except Exception as e:
+        print(f"[Audio] Error listing devices: {e}")
     return devices
 
 
@@ -58,10 +74,12 @@ def init_audio(device_id: int | None = None, device_name: str | None = None) -> 
     if device_name:
         # 按名称查找设备
         for i, dev in enumerate(sd.query_devices()):
-            if dev['max_input_channels'] > 0 and device_name in dev['name']:
+            max_input = _get_device_attr(dev, "max_input_channels")
+            name = str(_get_device_attr(dev, "name"))
+            if max_input and max_input > 0 and device_name in name:
                 _DEVICE_ID = i
-                _RATE = int(dev['default_samplerate'])
-                print(f"[Audio] Found device by name: [{i}] {dev['name']}")
+                _RATE = int(_get_device_attr(dev, "default_samplerate") or WHISPER_RATE)
+                print(f"[Audio] Found device by name: [{i}] {name} (rate={_RATE})")
                 return _DEVICE_ID, _RATE
         print(f"[Audio] Device not found by name: {device_name}")
 
@@ -74,7 +92,18 @@ def get_device_config() -> tuple[int | None, int]:
     return _DEVICE_ID, _RATE
 
 
-init_audio(0)  # 使用设备 0 (Microsoft 声音映射器)
+# 自动检测并使用默认输入设备
+def _auto_select_device():
+    """自动选择最佳输入设备"""
+    try:
+        default_id = sd.default.device[0]
+        if default_id is not None:
+            return default_id
+    except Exception:
+        pass
+    return 0  # 默认使用设备 0
+
+init_audio(_auto_select_device())
 
 
 def _resample(audio: np.ndarray, orig_rate: int) -> np.ndarray:
@@ -102,6 +131,7 @@ class AudioRecorder:
 
     def _open_stream(self):
         try:
+            print(f"[Audio] Opening stream: device={_DEVICE_ID}, rate={self._sample_rate}")
             self._stream = sd.InputStream(
                 samplerate=self._sample_rate,
                 channels=CHANNELS,
@@ -111,6 +141,7 @@ class AudioRecorder:
                 blocksize=int(self._sample_rate * 0.1),  # 0.1秒
             )
             self._stream.start()
+            print(f"[Audio] Stream opened successfully")
         except Exception as e:
             print(f"[Audio] Failed to open stream: {e}")
 

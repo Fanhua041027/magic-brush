@@ -46,7 +46,15 @@ def detect_device() -> str:
     try:
         import ctranslate2
         if ctranslate2.get_cuda_device_count() > 0:
-            return "cuda"
+            # 测试 CUDA 是否真正可用
+            try:
+                import faster_whisper
+                model = faster_whisper.WhisperModel("tiny", device="cuda", compute_type="int8")
+                del model
+                return "cuda"
+            except Exception:
+                print("[Transcriber] CUDA detected but not working, falling back to CPU")
+                return "cpu"
     except Exception:
         pass
     return "cpu"
