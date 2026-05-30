@@ -90,7 +90,7 @@ type KBSearchItem struct {
 func NewClient(port int) *Client {
 	return &Client{
 		baseURL: fmt.Sprintf("http://127.0.0.1:%d", port),
-		http:    &http.Client{Timeout: 60 * time.Second},
+		http:    &http.Client{Timeout: 180 * time.Second},
 	}
 }
 

@@ -42,18 +42,23 @@ except Exception:
 from faster_whisper import WhisperModel  # noqa: E402
 
 
-def detect_device() -> str:
+def detect_device(model_name: str = "base") -> str:
     try:
         import ctranslate2
         if ctranslate2.get_cuda_device_count() > 0:
-            # 测试 CUDA 是否真正可用
+            # 测试 CUDA 是否真正可用（使用 tiny 模型快速测试）
             try:
                 import faster_whisper
                 model = faster_whisper.WhisperModel("tiny", device="cuda", compute_type="int8")
+                # 测试转写功能
+                import numpy as np
+                test_audio = np.zeros(16000, dtype=np.float32)
+                segments, _ = model.transcribe(test_audio, language="en")
+                list(segments)  # 消费生成器
                 del model
                 return "cuda"
-            except Exception:
-                print("[Transcriber] CUDA detected but not working, falling back to CPU")
+            except Exception as e:
+                print(f"[Transcriber] CUDA detected but not working: {e}")
                 return "cpu"
     except Exception:
         pass
@@ -66,7 +71,7 @@ class Transcriber:
         self._language = language if language != "auto" else ""
 
         if device == "auto":
-            self.device = detect_device()
+            self.device = detect_device(model_name)
         else:
             self.device = device
 

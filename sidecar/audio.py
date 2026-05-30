@@ -1,4 +1,4 @@
-"""Audio capture module — using sounddevice callback."""
+"""Audio capture module — using sounddevice with blocking read."""
 
 import sys
 import threading
@@ -57,7 +57,7 @@ def list_input_devices() -> list[dict[str, Any]]:
 
 
 _DEVICE_ID = None
-_RATE = WHISPER_RATE
+_RATE = 48000  # 强制使用 48000 Hz（Intel SST 需要）
 _DEVICE_NAME = None
 
 
@@ -78,13 +78,11 @@ def init_audio(device_id: int | None = None, device_name: str | None = None) -> 
             name = str(_get_device_attr(dev, "name"))
             if max_input and max_input > 0 and device_name in name:
                 _DEVICE_ID = i
-                _RATE = int(_get_device_attr(dev, "default_samplerate") or WHISPER_RATE)
                 print(f"[Audio] Found device by name: [{i}] {name} (rate={_RATE})")
                 return _DEVICE_ID, _RATE
         print(f"[Audio] Device not found by name: {device_name}")
 
     _DEVICE_ID = device_id
-    _RATE = WHISPER_RATE
     return _DEVICE_ID, _RATE
 
 
@@ -114,7 +112,7 @@ def _resample(audio: np.ndarray, orig_rate: int) -> np.ndarray:
 
 
 class AudioRecorder:
-    """录音器 - 使用 sounddevice 回调"""
+    """录音器 - 使用 sounddevice 阻塞读取"""
 
     def __init__(self):
         self._frames: list[np.ndarray] = []
@@ -125,6 +123,8 @@ class AudioRecorder:
         self._streaming_interval = 0.5
         self._last_streaming_time = 0
         self._stream = None
+        self._read_thread = None
+        self._stop_event = threading.Event()
 
         # 打开音频流
         self._open_stream()
@@ -137,33 +137,52 @@ class AudioRecorder:
                 channels=CHANNELS,
                 dtype='float32',
                 device=_DEVICE_ID,
-                callback=self._audio_callback,
                 blocksize=int(self._sample_rate * 0.1),  # 0.1秒
             )
             self._stream.start()
             print(f"[Audio] Stream opened successfully")
+            # 启动读取线程
+            self._stop_event.clear()
+            self._read_thread = threading.Thread(target=self._read_audio, daemon=True)
+            self._read_thread.start()
         except Exception as e:
             print(f"[Audio] Failed to open stream: {e}")
 
-    def _audio_callback(self, indata, frames, time_info, status):
-        """音频回调"""
-        audio = indata[:, 0].copy()
-        with self._lock:
-            if self._recording:
-                self._frames.append(audio)
-                now = time.time()
-                if (self._streaming_callback and
-                    now - self._last_streaming_time >= self._streaming_interval):
-                    self._last_streaming_time = now
-                    if self._frames:
-                        chunk = np.concatenate(self._frames[-10:], axis=0).flatten()
-                        threading.Thread(
-                            target=self._streaming_callback,
-                            args=(chunk,),
-                            daemon=True
-                        ).start()
+    def _read_audio(self):
+        """独立线程读取音频数据"""
+        while not self._stop_event.is_set():
+            try:
+                data, overflowed = self._stream.read(int(self._sample_rate * 0.1))
+                if overflowed:
+                    print("[Audio] Warning: audio buffer overflow")
+                audio = data[:, 0].copy()
+                with self._lock:
+                    if self._recording:
+                        self._frames.append(audio)
+                        # 调试：每秒打印一次音频 RMS
+                        if len(self._frames) % 10 == 0:
+                            rms = np.sqrt(np.mean(audio**2))
+                            print(f"[Audio] read thread: RMS={rms:.6f}, frames={len(self._frames)}", flush=True)
+                        now = time.time()
+                        if (self._streaming_callback and
+                            now - self._last_streaming_time >= self._streaming_interval):
+                            self._last_streaming_time = now
+                            if self._frames:
+                                chunk = np.concatenate(self._frames[-10:], axis=0).flatten()
+                                threading.Thread(
+                                    target=self._streaming_callback,
+                                    args=(chunk,),
+                                    daemon=True
+                                ).start()
+            except Exception as e:
+                if not self._stop_event.is_set():
+                    print(f"[Audio] Read error: {e}")
+                break
 
     def reopen(self, device_id: int | None = None) -> bool:
+        self._stop_event.set()
+        if self._read_thread:
+            self._read_thread.join(timeout=1)
         if self._stream:
             self._stream.stop()
             self._stream.close()
@@ -226,6 +245,9 @@ class AudioRecorder:
         return self.stop_recording()
 
     def close(self):
+        self._stop_event.set()
+        if self._read_thread:
+            self._read_thread.join(timeout=1)
         if self._stream:
             self._stream.stop()
             self._stream.close()

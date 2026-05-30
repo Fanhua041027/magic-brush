@@ -7,6 +7,8 @@ import sys
 import threading
 import time
 
+import numpy as np
+
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 from flask_sock import Sock
@@ -339,6 +341,7 @@ def stt_stop():
 
     try:
         text = ""
+        print(f"[STT] stop: audio_size={audio.size}, rms={np.sqrt(np.mean(audio**2)):.6f}", flush=True)
         if stt_service_type == "qwen_local" and qwen_asr_local:
             # 使用千问本地 ASR
             text = qwen_asr_local.recognize(audio)
@@ -347,7 +350,9 @@ def stt_stop():
             text = qwen_stt.recognize(audio)
         elif transcriber:
             # 使用本地 Whisper
+            print(f"[STT] transcribing with {transcriber.device}...", flush=True)
             text = transcriber.transcribe(audio)
+            print(f"[STT] result: [{text}]", flush=True)
 
         return jsonify({"text": text})
     except Exception as e:
@@ -445,7 +450,7 @@ def main():
 
     parser = argparse.ArgumentParser(description="AI-Assistant Sidecar")
     parser.add_argument("--port", type=int, default=18765, help="HTTP port")
-    parser.add_argument("--model", default="base", help="Whisper model size")
+    parser.add_argument("--model", default="medium", help="Whisper model size")
     parser.add_argument("--device", default="auto", help="Device: auto/cuda/cpu")
     parser.add_argument("--language", default="zh", help="Language: zh/en/auto")
     parser.add_argument("--sensitivity", type=float, default=0.5, help="Sensitivity: 0.0-1.0")
@@ -516,7 +521,7 @@ def main():
     print(f"[Sidecar] STT Service: {stt_service}")
     print(f"[Sidecar] Starting HTTP server on port {args.port}")
     print(f"[Sidecar] WebSocket available at ws://127.0.0.1:{args.port}/ws")
-    app.run(host="127.0.0.1", port=args.port, debug=False)
+    app.run(host="127.0.0.1", port=args.port, debug=False, threaded=True)
 
 
 if __name__ == "__main__":
