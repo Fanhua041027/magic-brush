@@ -21,6 +21,12 @@ export namespace config {
 	    windowWidth?: number;
 	    windowHeight?: number;
 	    theme?: string;
+	    sttModel?: string;
+	    sttDevice?: string;
+	    sttLanguage?: string;
+	    sttSensitivity?: number;
+	    sttService?: string;
+	    kbPath?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new Config(source);
@@ -48,6 +54,12 @@ export namespace config {
 	        this.windowWidth = source["windowWidth"];
 	        this.windowHeight = source["windowHeight"];
 	        this.theme = source["theme"];
+	        this.sttModel = source["sttModel"];
+	        this.sttDevice = source["sttDevice"];
+	        this.sttLanguage = source["sttLanguage"];
+	        this.sttSensitivity = source["sttSensitivity"];
+	        this.sttService = source["sttService"];
+	        this.kbPath = source["kbPath"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

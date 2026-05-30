@@ -6,9 +6,19 @@ import {config} from '../models';
 
 export function CancelRunningTask():Promise<boolean>;
 
+export function ChatWithDeepSeek(arg1:string):Promise<string>;
+
+export function ChatWithDeepSeekStream(arg1:string):Promise<void>;
+
+export function ChatWithDeepSeekStreamWithContext(arg1:Array<Record<string, string>>):Promise<void>;
+
+export function ChatWithScreenshot(arg1:string,arg2:string,arg3:string):Promise<void>;
+
 export function CheckMicrophoneAccess():Promise<number>;
 
 export function CheckScreenCapturePermission():Promise<boolean>;
+
+export function ClearKB():Promise<void>;
 
 export function ClearResume():Promise<void>;
 
@@ -22,17 +32,29 @@ export function GetDomainCategories():Promise<Array<domain.Category>>;
 
 export function GetInitStatus():Promise<string>;
 
+export function GetKBStatus():Promise<Record<string, any>>;
+
 export function GetModels(arg1:string):Promise<Array<string>>;
 
 export function GetResumePDF():Promise<string>;
+
+export function GetSTTDevices():Promise<Record<string, any>>;
+
+export function GetSTTStatus():Promise<Record<string, boolean>>;
 
 export function GetScreenshotPreview(arg1:number,arg2:number,arg3:boolean,arg4:boolean,arg5:string):Promise<screen.PreviewResult>;
 
 export function GetSettings():Promise<config.Config>;
 
+export function InjectTextToActiveInput(arg1:string):Promise<void>;
+
 export function IsInterruptThinkingEnabled():Promise<boolean>;
 
+export function LoadKB(arg1:string):Promise<Record<string, any>>;
+
 export function MoveWindow(arg1:number,arg2:number):Promise<void>;
+
+export function OpenChat():Promise<void>;
 
 export function OpenMicrophoneSettings():Promise<void>;
 
@@ -52,11 +74,25 @@ export function RequestScreenCapturePermission():Promise<boolean>;
 
 export function RestoreFocus():Promise<void>;
 
+export function STTStart():Promise<Record<string, string>>;
+
+export function STTStop():Promise<Record<string, string>>;
+
 export function SaveImageToFile(arg1:string):Promise<boolean>;
 
 export function ScrollContent(arg1:string):Promise<void>;
 
+export function SearchKB(arg1:string):Promise<Record<string, any>>;
+
+export function SelectKBDirectory():Promise<string>;
+
 export function SelectResume():Promise<string>;
+
+export function SetPendingUserMessage(arg1:string):Promise<void>;
+
+export function SetSTTDevice(arg1:number):Promise<Record<string, any>>;
+
+export function SetSTTDeviceByName(arg1:string):Promise<Record<string, any>>;
 
 export function SetWindowAlwaysOnTop(arg1:boolean):Promise<void>;
 
@@ -64,11 +100,17 @@ export function Show():Promise<void>;
 
 export function StartRecordingKey(arg1:string):Promise<void>;
 
+export function StartSTTRecording():Promise<void>;
+
 export function StopRecordingKey():Promise<void>;
+
+export function StopSTTRecording():Promise<void>;
 
 export function TestConnection(arg1:string,arg2:string):Promise<string>;
 
 export function ToggleClickThrough():Promise<void>;
+
+export function ToggleSTT():Promise<Record<string, string>>;
 
 export function ToggleVisibility():Promise<void>;
 
@@ -80,36 +122,4 @@ export function TriggerSend():Promise<void>;
 
 export function TriggerSolve():Promise<void>;
 
-export function GetSTTStatus():Promise<{[key:string]:boolean}>;
-
-export function GetSTTDevices():Promise<{[key:string]:any}>;
-
-export function SetSTTDevice(arg1:number):Promise<{[key:string]:any}>;
-
-export function STTStart():Promise<{[key:string]:string}>;
-
-export function STTStop():Promise<{[key:string]:string}>;
-
-export function ToggleSTT():Promise<{[key:string]:string}>;
-
-export function GetKBStatus():Promise<{[key:string]:any}>;
-
-export function LoadKB(arg1:string):Promise<{[key:string]:any}>;
-
-export function SearchKB(arg1:string):Promise<{[key:string]:any}>;
-
-export function SelectKBDirectory():Promise<string>;
-
-export function ClearKB():Promise<void>;
-
-export function SetPendingUserMessage(arg1:string):Promise<void>;
-
 export function UpdateSettings(arg1:string):Promise<string>;
-
-export function ChatWithDeepSeek(arg1:string):Promise<string>;
-
-export function ChatWithDeepSeekStream(arg1:string):Promise<void>;
-
-export function ChatWithDeepSeekStreamWithContext(arg1:Array<{[key:string]:string}>):Promise<void>;
-
-export function ChatWithScreenshot(arg1:string,arg2:string,arg3:string):Promise<void>;

@@ -35,3 +35,6 @@ yarn-debug.log*
 yarn-error.log*
 sidecar/__pycache__/
 __pycache__/
+sidecar/~/
+__pycache__/
+*.pyc

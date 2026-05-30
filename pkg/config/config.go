@@ -35,8 +35,11 @@ type Config struct {
 	Theme string `json:"theme,omitempty"`
 
 	// STT 语音转写
-	STTModel  string `json:"sttModel,omitempty"`
-	STTDevice string `json:"sttDevice,omitempty"`
+	STTModel       string  `json:"sttModel,omitempty"`
+	STTDevice      string  `json:"sttDevice,omitempty"`
+	STTLanguage    string  `json:"sttLanguage,omitempty"`    // 语言：zh, en, auto
+	STTSensitivity float64 `json:"sttSensitivity,omitempty"` // 灵敏度：0.0-1.0
+	STTService     string  `json:"sttService,omitempty"`     // STT 服务：qwen, local
 
 	// 知识库
 	KBPath string `json:"kbPath,omitempty"`
@@ -75,8 +78,11 @@ func NewDefaultConfig() Config {
 		Theme: "light",
 
 		// STT
-		STTModel:  "base",
-		STTDevice: "auto",
+		STTModel:       "base",
+		STTDevice:      "auto",
+		STTLanguage:    "zh",         // 默认中文
+		STTSensitivity: 0.5,        // 中等灵敏度
+		STTService:     "qwen_local", // 默认使用千问本地 ASR
 
 		// 知识库
 		KBPath: "",

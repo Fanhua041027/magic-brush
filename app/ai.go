@@ -3,6 +3,7 @@ package app
 import (
 	"ai-assistant/pkg/config"
 	"ai-assistant/pkg/logger"
+	"time"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -99,12 +100,32 @@ func (a *App) SetSTTDevice(deviceID int) map[string]interface{} {
 	return out
 }
 
+// SetSTTDeviceByName 按设备名称设置音频输入设备
+func (a *App) SetSTTDeviceByName(deviceName string) map[string]interface{} {
+	if a.sidecar == nil || !a.sidecar.IsRunning() {
+		return map[string]interface{}{"error": "Sidecar not running"}
+	}
+	// 通过 HTTP 调用 sidecar 的设备切换接口
+	// 这里复用 STTSetDevice，但传递设备名称
+	result, err := a.sidecar.Client().STTSetDeviceByName(deviceName)
+	if err != nil {
+		return map[string]interface{}{"error": err.Error()}
+	}
+	return map[string]interface{}{
+		"status": result.Status,
+	}
+}
+
 func (a *App) StartSTTRecording() {
 	if a.sidecar == nil || !a.sidecar.IsRunning() {
 		return
 	}
-	a.sidecar.Client().STTStart()
+	// 使用流式转写
+	a.sidecar.Client().STTStartStreaming()
 	a.EmitEvent("stt-recording-started")
+
+	// 启动轮询流式结果的 goroutine
+	go a.pollStreamingResults()
 }
 
 func (a *App) StopSTTRecording() {
@@ -116,11 +137,42 @@ func (a *App) StopSTTRecording() {
 		return
 	}
 	if result.Text != "" {
-		// Set the transcribed text as pending user message for next solve
-		a.SetPendingUserMessage(result.Text)
+		// 将识别结果发送到 AI 对话输入框
 		a.EmitEvent("stt-transcribed", result.Text)
 	}
 	a.EmitEvent("stt-recording-stopped")
+}
+
+// InjectTextToActiveInput 注入文字到当前活动输入框（不抢焦点）
+func (a *App) InjectTextToActiveInput(text string) {
+	// 通过剪贴板 + 模拟 Ctrl+V 注入文字
+	injectTextViaClipboard(text)
+}
+
+func (a *App) pollStreamingResults() {
+	for {
+		// 检查是否还在录音
+		status, err := a.sidecar.Client().STTStatus()
+		if err != nil || !status.Recording {
+			return
+		}
+
+		// 获取流式转写结果
+		results, err := a.sidecar.Client().STTStreamingResults()
+		if err != nil {
+			time.Sleep(100 * time.Millisecond)
+			continue
+		}
+
+		// 发送流式转写结果到前端
+		for _, text := range results {
+			if text != "" {
+				a.EmitEvent("stt-streaming-text", text)
+			}
+		}
+
+		time.Sleep(100 * time.Millisecond)
+	}
 }
 
 // ── KB (Knowledge Base) bindings ──────────────────────────────────────

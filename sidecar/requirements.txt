@@ -1,5 +1,13 @@
 flask>=3.0
+flask-sock>=0.7.0
+flask-cors>=4.0.0
 sounddevice>=0.5
 numpy>=1.26
 faster-whisper>=1.1
 zhconv>=1.4
+requests>=2.31.0
+websocket-client>=1.6.0
+modelscope>=1.10.0
+torch>=2.0.0
+torchaudio>=2.0.0
+soundfile>=0.12.0

@@ -52,6 +52,53 @@
               step="0.05"
             />
           </div>
+
+          <div class="form-group">
+            <label>语音识别设置</label>
+            <div class="stt-settings">
+              <div class="stt-row">
+                <span class="stt-label">音频输入</span>
+                <select v-model="audioDevice" class="stt-select" @change="onAudioDeviceChange">
+                  <option value="mic">🎤 麦克风</option>
+                  <option value="stereo_mix">🔊 立体声混音（电脑内部音频）</option>
+                </select>
+              </div>
+              <div class="stt-row">
+                <span class="stt-label">识别服务</span>
+                <select v-model="settingsStore.tempSettings.sttService" class="stt-select">
+                  <option value="qwen_local">千问本地 Qwen3-ASR-Flash（推荐）</option>
+                  <option value="qwen_cloud">千问云端 Paraformer v2</option>
+                  <option value="local_whisper">本地 Whisper</option>
+                </select>
+              </div>
+              <div class="stt-row">
+                <span class="stt-label">识别语言</span>
+                <select v-model="settingsStore.tempSettings.sttLanguage" class="stt-select">
+                  <option value="zh">中文</option>
+                  <option value="en">英文</option>
+                  <option value="auto">自动检测</option>
+                </select>
+              </div>
+              <div class="stt-row">
+                <span class="stt-label">灵敏度</span>
+                <div class="stt-slider-wrapper">
+                  <input
+                    v-model.number="settingsStore.tempSettings.sttSensitivity"
+                    type="range"
+                    min="0.0"
+                    max="1.0"
+                    step="0.1"
+                    class="stt-slider"
+                  />
+                  <span class="stt-value">{{ Math.round(settingsStore.tempSettings.sttSensitivity * 100) }}%</span>
+                </div>
+              </div>
+              <p class="hint-text">
+                千问本地 Qwen3-ASR-Flash 识别准确率最高，推荐使用
+                <span v-if="settingsStore.tempSettings.sttService === 'qwen_local'" class="stt-badge">已启用</span>
+              </p>
+            </div>
+          </div>
         </div>
 
         <div v-show="ui.activeTab === 'model'" class="tab-pane model-tab">
@@ -135,7 +182,7 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useUIStore } from '../stores/ui'
 import { useSettingsStore } from '../stores/settings'
 import ResumeImport from './ResumeImport.vue'
@@ -147,6 +194,22 @@ import Icon from './Icon.vue'
 
 const ui = useUIStore()
 const settingsStore = useSettingsStore()
+
+// 音频设备选择 - 使用 settings store 中的 sttDevice
+const audioDevice = computed({
+  get: () => settingsStore.tempSettings.sttDevice || 'mic',
+  set: (val) => { settingsStore.tempSettings.sttDevice = val }
+})
+
+// 切换音频设备
+async function onAudioDeviceChange() {
+  try {
+    const deviceName = audioDevice.value === 'stereo_mix' ? '立体声混音' : '麦克风'
+    await window.go.main.App.SetSTTDeviceByName(deviceName)
+  } catch (e) {
+    console.error('切换音频设备失败:', e)
+  }
+}
 
 const screenshotConfig = computed({
   get: () => ({
@@ -361,6 +424,103 @@ const screenshotConfig = computed({
 .model-actions {
   display: flex;
   gap: var(--sp-2);
+}
+
+.stt-settings {
+  background: var(--surface-card);
+  border-radius: var(--radius-lg);
+  padding: var(--sp-4);
+  border: 1px solid var(--border-default);
+}
+
+.stt-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--sp-3);
+}
+
+.stt-row:last-of-type {
+  margin-bottom: 0;
+}
+
+.stt-label {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.stt-select {
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-default);
+  background: var(--surface-elevated);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.stt-select:focus {
+  border-color: var(--accent);
+}
+
+.stt-slider-wrapper {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex: 1;
+  max-width: 200px;
+}
+
+.stt-slider {
+  flex: 1;
+  height: 4px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: var(--border-default);
+  border-radius: 2px;
+  outline: none;
+}
+
+.stt-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+  border: 2px solid white;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+.stt-value {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  font-weight: 600;
+  min-width: 35px;
+  text-align: right;
+}
+
+.hint-text {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  margin-top: var(--sp-2);
+  line-height: 1.4;
+}
+
+.stt-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  background: var(--accent-muted);
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-full);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--accent);
+  margin-left: 6px;
 }
 
 .btn-icon {

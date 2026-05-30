@@ -30,6 +30,7 @@ type Manager struct {
 
 const (
 	VK_LMENU = 164 // Left Alt
+	VK_RMENU = 165 // Right Alt
 )
 
 var globalManager *Manager
@@ -87,7 +88,9 @@ func (m *Manager) installHooks() {
 	// 安装键盘钩子
 	m.hHook = platform.SetWindowsHookEx(platform.WH_KEYBOARD_LL, kbdCallback, hMod, 0)
 	if m.hHook == 0 {
-		logger.Println("安装键盘钩子失败")
+		logger.Println("[Shortcut] 安装键盘钩子失败")
+	} else {
+		logger.Printf("[Shortcut] 键盘钩子已安装 (handle: %d)", m.hHook)
 	}
 
 	// 创建鼠标回调
@@ -95,12 +98,16 @@ func (m *Manager) installHooks() {
 	// 安装鼠标钩子
 	m.hMouseHook = platform.SetWindowsHookEx(platform.WH_MOUSE_LL, mouseCallback, hMod, 0)
 	if m.hMouseHook == 0 {
-		logger.Println("安装鼠标钩子失败")
+		logger.Println("[Shortcut] 安装鼠标钩子失败")
+	} else {
+		logger.Printf("[Shortcut] 鼠标钩子已安装 (handle: %d)", m.hMouseHook)
 	}
 
 	if m.hHook == 0 && m.hMouseHook == 0 {
 		return
 	}
+
+	logger.Println("[Shortcut] 开始监听键盘和鼠标事件...")
 
 	// 消息循环
 	var msg platform.MSG
@@ -131,14 +138,18 @@ func keyboardHookProc(nCode int, wParam uintptr, lParam uintptr) uintptr {
 		if kbd.VkCode == VK_LMENU {
 			if wParam == platform.WM_SYSKEYDOWN || wParam == platform.WM_KEYDOWN {
 				globalManager.heldKeys[kbd.VkCode] = true
+				logger.Printf("[Shortcut] Left Alt pressed, heldKeys: %d", len(globalManager.heldKeys))
 				if len(globalManager.heldKeys) == 1 && globalManager.OnPushToTalkStart != nil {
+					logger.Println("[Shortcut] Starting STT recording...")
 					go globalManager.OnPushToTalkStart()
 				}
 				return 1 // 吞掉 Left Alt，不传递给系统
 			}
 			if wParam == platform.WM_SYSKEYUP || wParam == platform.WM_KEYUP {
 				delete(globalManager.heldKeys, kbd.VkCode)
+				logger.Println("[Shortcut] Left Alt released")
 				if globalManager.OnPushToTalkStop != nil {
+					logger.Println("[Shortcut] Stopping STT recording...")
 					go globalManager.OnPushToTalkStop()
 				}
 				return 1

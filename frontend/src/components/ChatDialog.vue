@@ -13,9 +13,17 @@
                 已加载简历
               </span>
             </div>
-            <button class="chat-close" @click="close">
-              <Icon name="x" :size="18" />
-            </button>
+            <div class="chat-actions">
+              <button class="chat-action-btn" @click="exportHistory" title="导出历史">
+                <Icon name="download" :size="16" />
+              </button>
+              <button class="chat-action-btn" @click="clearHistory" title="清除历史">
+                <Icon name="trash-2" :size="16" />
+              </button>
+              <button class="chat-close" @click="close">
+                <Icon name="x" :size="18" />
+              </button>
+            </div>
           </div>
 
           <!-- Messages -->
@@ -65,7 +73,8 @@
             <div class="chat-hint">
               <span v-if="voiceStore.isRecording" class="recording-hint">
                 <span class="recording-dot"></span>
-                录音中...松开左 Alt 结束
+                <span v-if="streamingText" class="streaming-preview">{{ streamingText }}</span>
+                <span v-else>录音中...松开左 Alt 结束</span>
               </span>
               <span v-else>Enter 发送 · 左 Alt 语音输入</span>
             </div>
@@ -82,15 +91,18 @@ import Icon from './Icon.vue'
 import { useChatStore } from '../stores/chat'
 import { useVoiceStore } from '../stores/voice'
 import { useSettingsStore } from '../stores/settings'
+import { useUIStore } from '../stores/ui'
 import { renderMarkdownWithLatex } from '../utils/markdown-latex'
 
 const chatStore = useChatStore()
 const voiceStore = useVoiceStore()
 const settingsStore = useSettingsStore()
+const ui = useUIStore()
 
 const inputText = ref('')
 const messagesRef = ref(null)
 const inputRef = ref(null)
+const streamingText = ref('')  // 流式转写文本
 
 function renderMarkdown(text) {
   if (!text) return ''
@@ -101,6 +113,18 @@ function close() {
   chatStore.hide()
 }
 
+function exportHistory() {
+  chatStore.exportHistory()
+  ui.showToast('对话历史已导出', 'success')
+}
+
+function clearHistory() {
+  if (confirm('确定要清除所有对话历史吗？此操作不可恢复。')) {
+    chatStore.clearHistory()
+    ui.showToast('对话历史已清除', 'success')
+  }
+}
+
 async function sendMessage() {
   const text = inputText.value.trim()
   if (!text || chatStore.isLoading) return
@@ -108,14 +132,14 @@ async function sendMessage() {
   await chatStore.sendMessage(text)
 }
 
-// 监听语音转写结果
+// 监听语音转写结果 - 只填入输入框，不自动发送
 watch(() => voiceStore.transcribedText, (newText) => {
-  if (newText && chatStore.isVisible) {
+  if (newText) {
     inputText.value = newText
-    // 自动发送语音转写的结果
-    nextTick(() => {
-      sendMessage()
-    })
+    // 如果对话框未打开，自动打开
+    if (!chatStore.isVisible) {
+      chatStore.isVisible = true
+    }
   }
 })
 
@@ -146,6 +170,34 @@ onMounted(() => {
   })
   window.addEventListener('chat-stream-error', (e) => {
     chatStore.handleStreamError(e.detail)
+  })
+
+  // 监听流式转写
+  window.addEventListener('stt-streaming-text', (e) => {
+    if (e.detail) {
+      streamingText.value += e.detail
+      // 实时更新输入框
+      inputText.value = streamingText.value
+    }
+  })
+
+  // 监听录音开始
+  window.addEventListener('stt-recording-started', () => {
+    streamingText.value = ''
+    inputText.value = ''
+  })
+
+  // 监听录音结束
+  window.addEventListener('stt-recording-stopped', () => {
+    streamingText.value = ''
+  })
+
+  // 监听最终转写结果
+  window.addEventListener('stt-transcribed', (e) => {
+    if (e.detail) {
+      inputText.value = e.detail
+      streamingText.value = ''
+    }
   })
 })
 </script>
@@ -222,6 +274,31 @@ onMounted(() => {
 }
 
 .chat-close:hover {
+  background: var(--surface-card-hover);
+  color: var(--text-primary);
+}
+
+.chat-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.chat-action-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-md);
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+
+.chat-action-btn:hover {
   background: var(--surface-card-hover);
   color: var(--text-primary);
 }
@@ -449,6 +526,19 @@ onMounted(() => {
   gap: 6px;
   color: #ef4444;
   font-weight: 500;
+}
+
+.streaming-preview {
+  max-width: 300px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: var(--surface-card);
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-default);
 }
 
 .recording-dot {

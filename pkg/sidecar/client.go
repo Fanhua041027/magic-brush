@@ -39,6 +39,7 @@ type STTResult struct {
 type STTDeviceInfo struct {
 	ID               int    `json:"id"`
 	Name             string `json:"name"`
+	Type             string `json:"type"` // "mic" or "stereo_mix"
 	Channels         int    `json:"channels"`
 	DefaultSamplerate int   `json:"default_samplerate"`
 	HostAPI          string `json:"host_api"`
@@ -114,6 +115,34 @@ func (c *Client) STTStart() error {
 	return nil
 }
 
+func (c *Client) STTStartStreaming() error {
+	resp, err := c.http.Post(c.baseURL+"/api/stt/start-streaming", "application/json", nil)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("STT start streaming failed (%d): %s", resp.StatusCode, string(body))
+	}
+	return nil
+}
+
+func (c *Client) STTStreamingResults() ([]string, error) {
+	resp, err := c.http.Get(c.baseURL + "/api/stt/streaming-results")
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	var result struct {
+		Results []string `json:"results"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, err
+	}
+	return result.Results, nil
+}
+
 func (c *Client) STTStop() (*STTResult, error) {
 	resp, err := c.http.Post(c.baseURL+"/api/stt/stop", "application/json", nil)
 	if err != nil {
@@ -158,6 +187,23 @@ func (c *Client) STTDevices() (*STTDevicesResult, error) {
 
 func (c *Client) STTSetDevice(deviceID int) (*STTSetDeviceResult, error) {
 	body, _ := json.Marshal(map[string]int{"device_id": deviceID})
+	resp, err := c.http.Post(c.baseURL+"/api/stt/device", "application/json", bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	var result STTSetDeviceResult
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, err
+	}
+	if resp.StatusCode != 200 && result.Error != "" {
+		return nil, fmt.Errorf("STT set device error: %s", result.Error)
+	}
+	return &result, nil
+}
+
+func (c *Client) STTSetDeviceByName(deviceName string) (*STTSetDeviceResult, error) {
+	body, _ := json.Marshal(map[string]string{"device_name": deviceName})
 	resp, err := c.http.Post(c.baseURL+"/api/stt/device", "application/json", bytes.NewReader(body))
 	if err != nil {
 		return nil, err

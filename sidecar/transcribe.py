@@ -53,9 +53,9 @@ def detect_device() -> str:
 
 
 class Transcriber:
-    def __init__(self, model_name: str = "base", device: str = "auto", compute_type: str = "auto", language: str = ""):
+    def __init__(self, model_name: str = "base", device: str = "auto", compute_type: str = "auto", language: str = "zh"):
         self._model_name = model_name
-        self._language = language
+        self._language = language if language != "auto" else ""
 
         if device == "auto":
             self.device = detect_device()
@@ -84,7 +84,22 @@ class Transcriber:
         if audio.size == 0:
             return ""
         ALLOWED_LANGS = {"zh", "en"}
-        segments, info = self._model.transcribe(audio, language=self._language or None, vad_filter=True)
+        segments, info = self._model.transcribe(
+            audio,
+            language=self._language or None,
+            vad_filter=True,
+            vad_parameters=dict(
+                min_silence_duration_ms=500,  # 最小静音持续时间（毫秒）
+                speech_pad_ms=200,  # 语音填充时间（毫秒）
+            ),
+            beam_size=5,  # 束搜索大小
+            best_of=5,  # 最佳候选数量
+            temperature=0.0,  # 温度参数（0.0 表示确定性输出）
+            compression_ratio_threshold=2.4,  # 压缩率阈值
+            log_prob_threshold=-1.0,  # 对数概率阈值
+            no_speech_threshold=0.6,  # 无语音阈值
+            condition_on_previous_text=True,  # 基于前文条件化
+        )
         detected = info.language if info else None
         if detected and detected not in ALLOWED_LANGS:
             return ""

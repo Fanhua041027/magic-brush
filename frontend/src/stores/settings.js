@@ -26,6 +26,9 @@ export const useSettingsStore = defineStore('settings', () => {
     kbPath: '',
     sttModel: 'base',
     sttDevice: 'auto',
+    sttLanguage: 'zh',
+    sttSensitivity: 0.5,
+    sttService: 'qwen',
   })
 
   const tempSettings = reactive({ ...settings })
@@ -185,6 +188,9 @@ export const useSettingsStore = defineStore('settings', () => {
     settings.kbPath = config.kbPath || ''
     settings.sttModel = config.sttModel || 'base'
     settings.sttDevice = config.sttDevice || 'auto'
+    settings.sttLanguage = config.sttLanguage || 'zh'
+    settings.sttSensitivity = config.sttSensitivity !== undefined ? config.sttSensitivity : 0.5
+    settings.sttService = config.sttService || 'qwen'
 
     const opacity = config.opacity !== undefined ? config.opacity : 1.0
     settings.transparency = 1.0 - opacity
@@ -280,6 +286,9 @@ export const useSettingsStore = defineStore('settings', () => {
       kbPath: sourceSettings.kbPath,
       sttModel: sourceSettings.sttModel,
       sttDevice: sourceSettings.sttDevice,
+      sttLanguage: sourceSettings.sttLanguage,
+      sttSensitivity: sourceSettings.sttSensitivity,
+      sttService: sourceSettings.sttService,
       shortcuts: sourceShortcuts,
       theme: currentTheme.value,
     }

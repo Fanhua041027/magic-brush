@@ -6,12 +6,32 @@ export function CancelRunningTask() {
   return window['go']['app']['App']['CancelRunningTask']();
 }
 
+export function ChatWithDeepSeek(arg1) {
+  return window['go']['app']['App']['ChatWithDeepSeek'](arg1);
+}
+
+export function ChatWithDeepSeekStream(arg1) {
+  return window['go']['app']['App']['ChatWithDeepSeekStream'](arg1);
+}
+
+export function ChatWithDeepSeekStreamWithContext(arg1) {
+  return window['go']['app']['App']['ChatWithDeepSeekStreamWithContext'](arg1);
+}
+
+export function ChatWithScreenshot(arg1, arg2, arg3) {
+  return window['go']['app']['App']['ChatWithScreenshot'](arg1, arg2, arg3);
+}
+
 export function CheckMicrophoneAccess() {
   return window['go']['app']['App']['CheckMicrophoneAccess']();
 }
 
 export function CheckScreenCapturePermission() {
   return window['go']['app']['App']['CheckScreenCapturePermission']();
+}
+
+export function ClearKB() {
+  return window['go']['app']['App']['ClearKB']();
 }
 
 export function ClearResume() {
@@ -38,12 +58,24 @@ export function GetInitStatus() {
   return window['go']['app']['App']['GetInitStatus']();
 }
 
+export function GetKBStatus() {
+  return window['go']['app']['App']['GetKBStatus']();
+}
+
 export function GetModels(arg1) {
   return window['go']['app']['App']['GetModels'](arg1);
 }
 
 export function GetResumePDF() {
   return window['go']['app']['App']['GetResumePDF']();
+}
+
+export function GetSTTDevices() {
+  return window['go']['app']['App']['GetSTTDevices']();
+}
+
+export function GetSTTStatus() {
+  return window['go']['app']['App']['GetSTTStatus']();
 }
 
 export function GetScreenshotPreview(arg1, arg2, arg3, arg4, arg5) {
@@ -54,12 +86,24 @@ export function GetSettings() {
   return window['go']['app']['App']['GetSettings']();
 }
 
+export function InjectTextToActiveInput(arg1) {
+  return window['go']['app']['App']['InjectTextToActiveInput'](arg1);
+}
+
 export function IsInterruptThinkingEnabled() {
   return window['go']['app']['App']['IsInterruptThinkingEnabled']();
 }
 
+export function LoadKB(arg1) {
+  return window['go']['app']['App']['LoadKB'](arg1);
+}
+
 export function MoveWindow(arg1, arg2) {
   return window['go']['app']['App']['MoveWindow'](arg1, arg2);
+}
+
+export function OpenChat() {
+  return window['go']['app']['App']['OpenChat']();
 }
 
 export function OpenMicrophoneSettings() {
@@ -98,6 +142,14 @@ export function RestoreFocus() {
   return window['go']['app']['App']['RestoreFocus']();
 }
 
+export function STTStart() {
+  return window['go']['app']['App']['STTStart']();
+}
+
+export function STTStop() {
+  return window['go']['app']['App']['STTStop']();
+}
+
 export function SaveImageToFile(arg1) {
   return window['go']['app']['App']['SaveImageToFile'](arg1);
 }
@@ -106,8 +158,28 @@ export function ScrollContent(arg1) {
   return window['go']['app']['App']['ScrollContent'](arg1);
 }
 
+export function SearchKB(arg1) {
+  return window['go']['app']['App']['SearchKB'](arg1);
+}
+
+export function SelectKBDirectory() {
+  return window['go']['app']['App']['SelectKBDirectory']();
+}
+
 export function SelectResume() {
   return window['go']['app']['App']['SelectResume']();
+}
+
+export function SetPendingUserMessage(arg1) {
+  return window['go']['app']['App']['SetPendingUserMessage'](arg1);
+}
+
+export function SetSTTDevice(arg1) {
+  return window['go']['app']['App']['SetSTTDevice'](arg1);
+}
+
+export function SetSTTDeviceByName(arg1) {
+  return window['go']['app']['App']['SetSTTDeviceByName'](arg1);
 }
 
 export function SetWindowAlwaysOnTop(arg1) {
@@ -122,8 +194,16 @@ export function StartRecordingKey(arg1) {
   return window['go']['app']['App']['StartRecordingKey'](arg1);
 }
 
+export function StartSTTRecording() {
+  return window['go']['app']['App']['StartSTTRecording']();
+}
+
 export function StopRecordingKey() {
   return window['go']['app']['App']['StopRecordingKey']();
+}
+
+export function StopSTTRecording() {
+  return window['go']['app']['App']['StopSTTRecording']();
 }
 
 export function TestConnection(arg1, arg2) {
@@ -132,6 +212,10 @@ export function TestConnection(arg1, arg2) {
 
 export function ToggleClickThrough() {
   return window['go']['app']['App']['ToggleClickThrough']();
+}
+
+export function ToggleSTT() {
+  return window['go']['app']['App']['ToggleSTT']();
 }
 
 export function ToggleVisibility() {
@@ -154,70 +238,6 @@ export function TriggerSolve() {
   return window['go']['app']['App']['TriggerSolve']();
 }
 
-export function GetSTTStatus() {
-  return window['go']['app']['App']['GetSTTStatus']();
-}
-
-export function GetSTTDevices() {
-  return window['go']['app']['App']['GetSTTDevices']();
-}
-
-export function SetSTTDevice(arg1) {
-  return window['go']['app']['App']['SetSTTDevice'](arg1);
-}
-
-export function STTStart() {
-  return window['go']['app']['App']['STTStart']();
-}
-
-export function STTStop() {
-  return window['go']['app']['App']['STTStop']();
-}
-
-export function ToggleSTT() {
-  return window['go']['app']['App']['ToggleSTT']();
-}
-
-export function GetKBStatus() {
-  return window['go']['app']['App']['GetKBStatus']();
-}
-
-export function LoadKB(arg1) {
-  return window['go']['app']['App']['LoadKB'](arg1);
-}
-
-export function SearchKB(arg1) {
-  return window['go']['app']['App']['SearchKB'](arg1);
-}
-
-export function SelectKBDirectory() {
-  return window['go']['app']['App']['SelectKBDirectory']();
-}
-
-export function ClearKB() {
-  return window['go']['app']['App']['ClearKB']();
-}
-
-export function SetPendingUserMessage(arg1) {
-  return window['go']['app']['App']['SetPendingUserMessage'](arg1);
-}
-
 export function UpdateSettings(arg1) {
   return window['go']['app']['App']['UpdateSettings'](arg1);
-}
-
-export function ChatWithDeepSeek(arg1) {
-  return window['go']['app']['App']['ChatWithDeepSeek'](arg1);
-}
-
-export function ChatWithDeepSeekStream(arg1) {
-  return window['go']['app']['App']['ChatWithDeepSeekStream'](arg1);
-}
-
-export function ChatWithDeepSeekStreamWithContext(arg1) {
-  return window['go']['app']['App']['ChatWithDeepSeekStreamWithContext'](arg1);
-}
-
-export function ChatWithScreenshot(arg1, arg2, arg3) {
-  return window['go']['app']['App']['ChatWithScreenshot'](arg1, arg2, arg3);
 }

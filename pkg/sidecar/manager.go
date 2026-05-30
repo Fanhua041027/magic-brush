@@ -16,7 +16,7 @@ func NewManager(port int) *Manager {
 	}
 }
 
-func (m *Manager) Start(model, device string) error {
+func (m *Manager) Start(model, device, language string, sensitivity float64, sttService string) error {
 	// Check if already running
 	if err := m.client.Health(); err == nil {
 		logger.Printf("[Sidecar] Already running on port %d", m.port)
@@ -28,7 +28,15 @@ func (m *Manager) Start(model, device string) error {
 		return fmt.Errorf("sidecar/main.py not found")
 	}
 
-	args := []string{scriptPath, "--port", fmt.Sprintf("%d", m.port), "--model", model, "--device", device}
+	args := []string{
+		scriptPath,
+		"--port", fmt.Sprintf("%d", m.port),
+		"--model", model,
+		"--device", device,
+		"--language", language,
+		"--sensitivity", fmt.Sprintf("%.2f", sensitivity),
+		"--stt", sttService,
+	}
 	m.cmd = exec.Command("python", args...)
 	m.cmd.Env = append(os.Environ(), "HF_ENDPOINT=https://hf-mirror.com")
 

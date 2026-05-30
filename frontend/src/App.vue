@@ -37,6 +37,16 @@
 
   <div class="disclaimer">AI-Assistant 的回答仅供参考。</div>
 
+  <!-- 全局录音指示器 -->
+  <Teleport to="body">
+    <Transition name="overlay-fade">
+      <div v-if="voice.isRecording" class="global-recording-indicator">
+        <span class="recording-dot"></span>
+        <span>录音中...松开左 Alt 结束</span>
+      </div>
+    </Transition>
+  </Teleport>
+
   <ResizeHandle />
 </template>
 
@@ -60,6 +70,7 @@ import { useVoiceStore } from './stores/voice'
 import { useChatStore } from './stores/chat'
 import { on } from './services/events'
 import { api } from './services/api'
+import { wsService } from './services/websocket'
 import { initCodeBlockInteractions } from './utils/markdown-latex'
 
 const ui = useUIStore()
@@ -98,6 +109,29 @@ function onKBSelect(item) {
 
 onMounted(() => {
   initCodeBlockInteractions()
+
+  // 初始化 WebSocket 连接
+  wsService.connect()
+  wsService.startHeartbeat()
+
+  // 监听 WebSocket 事件
+  wsService.on('stt-streaming', (text) => {
+    window.dispatchEvent(new CustomEvent('stt-streaming-text', { detail: text }))
+  })
+
+  wsService.on('error', (error) => {
+    console.error('[App] WebSocket error:', error)
+    // 不显示错误提示，避免频繁弹出
+    // WebSocket 会自动重连
+  })
+
+  wsService.on('connected', () => {
+    console.log('[App] WebSocket connected')
+  })
+
+  wsService.on('disconnected', () => {
+    console.log('[App] WebSocket disconnected')
+  })
 
   api.getInitStatus().then(s => { ui.initStatus = s })
   on('init-status', (s) => { ui.initStatus = s })
@@ -273,11 +307,15 @@ onMounted(() => {
   on('stt-recording-started', () => {
     voice.isRecording = true
     voice.transcribedText = ''
+    // 触发自定义事件
+    window.dispatchEvent(new CustomEvent('stt-recording-started'))
   })
 
   on('stt-transcribed', (text) => {
     voice.isRecording = false
     voice.transcribedText = text || ''
+    // 触发自定义事件
+    window.dispatchEvent(new CustomEvent('stt-transcribed', { detail: text }))
     // 语音转写后自动打开对话框
     if (text && text.trim()) {
       chatStore.show()
@@ -286,6 +324,13 @@ onMounted(() => {
 
   on('stt-recording-stopped', () => {
     voice.isRecording = false
+    // 触发自定义事件
+    window.dispatchEvent(new CustomEvent('stt-recording-stopped'))
+  })
+
+  on('stt-streaming-text', (text) => {
+    // 触发流式转写事件
+    window.dispatchEvent(new CustomEvent('stt-streaming-text', { detail: text }))
   })
 
   on('require-api-key', () => {
@@ -418,5 +463,36 @@ onMounted(() => {
   flex-shrink: 0;
   letter-spacing: 0.3px;
   opacity: 0.7;
+}
+/* 全局录音指示器 */
+.global-recording-indicator {
+  position: fixed;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(255, 59, 48, 0.9);
+  color: white;
+  padding: 8px 16px;
+  border-radius: 20px;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  z-index: 99999;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+  pointer-events: none;
+}
+
+.recording-dot {
+  width: 10px;
+  height: 10px;
+  background: white;
+  border-radius: 50%;
+  animation: pulse 1s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
 }
 </style>
