@@ -14,6 +14,10 @@
       </div>
       <div class="header-right">
         <span v-if="duration" class="thinking-duration">{{ duration }}</span>
+        <button v-if="isActive" class="stop-thinking-btn" @click.stop="$emit('stop')" title="停止思考">
+          <Icon name="square" :size="12" />
+          <span>停止</span>
+        </button>
       </div>
     </div>
 
@@ -46,6 +50,8 @@ const props = defineProps({
   statusText: { type: String, default: 'Reasoning Process' },
   initialExpanded: { type: Boolean, default: true },
 })
+
+const emit = defineEmits(['stop'])
 
 const expanded = ref(props.initialExpanded)
 
@@ -124,6 +130,25 @@ const previewText = computed(() => {
   font-size: var(--text-xs);
   font-family: var(--font-mono);
   color: var(--text-muted);
+}
+
+.stop-thinking-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border: 1px solid var(--error-border);
+  border-radius: var(--radius-sm);
+  background: var(--error-bg);
+  color: var(--color-error);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--duration-fast) ease;
+}
+.stop-thinking-btn:hover {
+  background: var(--color-error);
+  color: white;
 }
 
 /* Pulse dots indicator */

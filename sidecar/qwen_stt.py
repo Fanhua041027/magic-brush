@@ -12,6 +12,7 @@ from typing import Optional, Callable
 
 import dashscope
 from dashscope.audio.asr import Recognition, RecognitionCallback, RecognitionResult
+import zhconv
 
 
 class QwenSTTCallback(RecognitionCallback):
@@ -23,9 +24,27 @@ class QwenSTTCallback(RecognitionCallback):
         self._event = threading.Event()
 
     def on_event(self, result: RecognitionResult):
-        sentence = result.get_sentence()
-        if sentence:
-            self.results.append(sentence)
+        # 尝试多种方式提取文本
+        try:
+            # 方式1: get_sentence()
+            sentence = result.get_sentence()
+            if sentence:
+                self.results.append(sentence)
+                return
+
+            # 方式2: 直接访问 output
+            if hasattr(result, 'output') and result.output:
+                output = result.output
+                if isinstance(output, dict):
+                    # 从 sentence 列表中提取文本
+                    sentences = output.get('sentence', [])
+                    for s in sentences:
+                        if isinstance(s, dict):
+                            text = s.get('text', '')
+                            if text and text.strip():
+                                self.results.append(text.strip())
+        except Exception as e:
+            print(f"[QwenSTT] on_event error: {e}", flush=True)
 
     def on_complete(self):
         self._event.set()
@@ -41,10 +60,17 @@ class QwenSTTCallback(RecognitionCallback):
 class QwenSTT:
     """千问语音识别服务（使用 DashScope SDK）"""
 
+    # 支持的模型列表（按优先级排序）
+    SUPPORTED_MODELS = [
+        "paraformer-realtime-v2",  # 唯一支持文件识别的实时模型
+    ]
+
     def __init__(self, api_key: str):
         self.api_key = api_key
         dashscope.api_key = api_key
-        self.model = "paraformer-realtime-v2"
+        self.model = self.SUPPORTED_MODELS[0]  # 使用第一个可用模型
+        self.language = "auto"  # auto: 中英文混合识别
+        self._failed_models = set()  # 记录失败的模型
 
         # 流式识别状态
         self._is_streaming = False
@@ -52,6 +78,23 @@ class QwenSTT:
         self._audio_buffer = []
         self._buffer_lock = threading.Lock()
         self._callback: Optional[Callable] = None
+
+    def _get_next_model(self) -> str:
+        """获取下一个可用的模型"""
+        for model in self.SUPPORTED_MODELS:
+            if model not in self._failed_models:
+                return model
+        # 所有模型都失败了，重置并使用第一个
+        self._failed_models.clear()
+        return self.SUPPORTED_MODELS[0]
+
+    def _mark_model_failed(self, model: str):
+        """标记模型为失败"""
+        self._failed_models.add(model)
+        print(f"[QwenSTT] Model {model} marked as failed", flush=True)
+        # 切换到下一个模型
+        self.model = self._get_next_model()
+        print(f"[QwenSTT] Switched to model: {self.model}", flush=True)
 
     def recognize(self, audio_data: np.ndarray, sample_rate: int = 16000) -> str:
         """
@@ -61,6 +104,8 @@ class QwenSTT:
         :return: 识别结果
         """
         try:
+            print(f"[QwenSTT] recognize: audio_size={len(audio_data)}, sample_rate={sample_rate}", flush=True)
+
             # 确保音频数据是 float32 格式
             if audio_data.dtype != np.float32:
                 audio_data = audio_data.astype(np.float32)
@@ -69,26 +114,92 @@ class QwenSTT:
             if audio_data.max() > 1.0:
                 audio_data = audio_data / 32767.0
 
+            rms = np.sqrt(np.mean(audio_data**2))
+            print(f"[QwenSTT] audio RMS={rms:.6f}", flush=True)
+
+            # 如果音频太短或太安静，直接返回空
+            if len(audio_data) < 1600 or rms < 0.001:
+                print(f"[QwenSTT] audio too short or silent, skipping", flush=True)
+                return ""
+
+            # 重采样到 16000 Hz（千问 API 推荐采样率）
+            if sample_rate != 16000:
+                target_len = int(len(audio_data) * 16000 / sample_rate)
+                audio_data = np.interp(
+                    np.linspace(0, len(audio_data) - 1, target_len),
+                    np.arange(len(audio_data)),
+                    audio_data
+                ).astype(np.float32)
+                sample_rate = 16000
+                print(f"[QwenSTT] resampled to 16000 Hz, new size={len(audio_data)}", flush=True)
+
             # 保存为临时 WAV 文件
             with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
                 sf.write(f.name, audio_data, sample_rate)
                 tmp_path = f.name
 
+            print(f"[QwenSTT] saved to {tmp_path}", flush=True)
+
             try:
                 # 使用 DashScope SDK 进行识别
                 cb = QwenSTTCallback()
-                rec = Recognition(
-                    model=self.model,
-                    callback=cb,
-                    format="wav",
-                    sample_rate=sample_rate,
-                )
+
+                # 根据模型选择参数
+                rec_params = {
+                    "model": self.model,
+                    "callback": cb,
+                    "format": "wav",
+                    "sample_rate": sample_rate,
+                }
+
+                # paraformer 模型支持 language_hints
+                if "paraformer" in self.model:
+                    rec_params["language_hints"] = ["zh", "en"]
+
+                rec = Recognition(**rec_params)
+                print(f"[QwenSTT] calling DashScope API...", flush=True)
                 result = rec.call(tmp_path)
 
+                print(f"[QwenSTT] result status={result.status_code}", flush=True)
+                print(f"[QwenSTT] result output={result.output}", flush=True)
+
+                # 从回调中获取结果
                 if result.status_code == 200 and cb.results:
-                    return " ".join(cb.results)
-                elif cb.error:
-                    print(f"[QwenSTT] Recognition error: {cb.error}")
+                    text = " ".join(cb.results)
+                    # 转换为简体中文
+                    text = zhconv.convert(text, "zh-hans")
+                    print(f"[QwenSTT] recognized from callback: [{text}]", flush=True)
+                    return text
+
+                # 如果回调没有结果，直接从 output 中提取
+                if result.status_code == 200 and result.output:
+                    output = result.output
+                    if isinstance(output, dict):
+                        sentences = output.get('sentence', [])
+                        texts = []
+                        for s in sentences:
+                            if isinstance(s, dict):
+                                text = s.get('text', '')
+                                if text and text.strip():
+                                    texts.append(text.strip())
+                        if texts:
+                            combined = " ".join(texts)
+                            # 转换为简体中文
+                            combined = zhconv.convert(combined, "zh-hans")
+                            print(f"[QwenSTT] recognized from output: [{combined}]", flush=True)
+                            return combined
+
+                # 检查是否需要切换模型
+                if result.status_code == 44:
+                    print(f"[QwenSTT] Model {self.model} not supported (status 44), switching...", flush=True)
+                    self._mark_model_failed(self.model)
+                    # 重试一次
+                    return self.recognize(audio_data, 16000)
+
+                if cb.error:
+                    print(f"[QwenSTT] Recognition error: {cb.error}", flush=True)
+                else:
+                    print(f"[QwenSTT] No results, status={result.status_code}", flush=True)
 
             finally:
                 # 清理临时文件
@@ -98,7 +209,7 @@ class QwenSTT:
                     pass
 
         except Exception as e:
-            print(f"[QwenSTT] Recognition error: {e}")
+            print(f"[QwenSTT] Recognition error: {e}", flush=True)
 
         return ""
 

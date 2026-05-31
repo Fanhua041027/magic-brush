@@ -55,6 +55,7 @@
               :isActive="solution.isThinking && idx === solution.currentRounds.length - 1"
               :isStalled="solution.isThinkingStalled && idx === solution.currentRounds.length - 1"
               :statusText="(solution.isThinking && idx === solution.currentRounds.length - 1) ? solution.thinkingStatusText : (round.thinkingStatus || 'Reasoning Process')"
+              @stop="cancelThinking"
             />
 
             <!-- AI response -->
@@ -112,6 +113,7 @@ import { ref, computed } from 'vue'
 import { useSolutionStore } from '../stores/solution'
 import { useSettingsStore } from '../stores/settings'
 import { useUIStore } from '../stores/ui'
+import { StopThinking } from '../../wailsjs/go/app/App'
 import Icon from './Icon.vue'
 import HistoryItem from './HistoryItem.vue'
 import EmptyState from './EmptyState.vue'
@@ -126,6 +128,18 @@ const settingsStore = useSettingsStore()
 const ui = useUIStore()
 
 const isHistoryCollapsed = ref(false)
+
+// Cancel thinking
+async function cancelThinking() {
+  try {
+    await StopThinking()
+    solution.isThinking = false
+    solution.isLoading = false
+    solution.isAppending = false
+  } catch (error) {
+    console.error('Cancel thinking error:', error)
+  }
+}
 
 // Check if there's any content in the current rounds
 const hasAnyContent = computed(() => {

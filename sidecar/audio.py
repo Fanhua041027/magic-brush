@@ -112,7 +112,7 @@ def _resample(audio: np.ndarray, orig_rate: int) -> np.ndarray:
 
 
 class AudioRecorder:
-    """录音器 - 使用 sounddevice 阻塞读取"""
+    """录音器 - 使用独立线程读取音频"""
 
     def __init__(self):
         self._frames: list[np.ndarray] = []
@@ -132,15 +132,17 @@ class AudioRecorder:
     def _open_stream(self):
         try:
             print(f"[Audio] Opening stream: device={_DEVICE_ID}, rate={self._sample_rate}")
+            # 使用较小的 blocksize 减少延迟
+            blocksize = int(self._sample_rate * 0.05)  # 50ms 块大小
             self._stream = sd.InputStream(
                 samplerate=self._sample_rate,
                 channels=CHANNELS,
                 dtype='float32',
                 device=_DEVICE_ID,
-                blocksize=int(self._sample_rate * 0.1),  # 0.1秒
+                blocksize=blocksize,
             )
             self._stream.start()
-            print(f"[Audio] Stream opened successfully")
+            print(f"[Audio] Stream opened successfully (blocksize={blocksize})")
             # 启动读取线程
             self._stop_event.clear()
             self._read_thread = threading.Thread(target=self._read_audio, daemon=True)
@@ -150,17 +152,20 @@ class AudioRecorder:
 
     def _read_audio(self):
         """独立线程读取音频数据"""
+        print(f"[Audio] Read thread started", flush=True)
+        # 使用与流相同的块大小
+        read_size = int(self._sample_rate * 0.05)  # 50ms
         while not self._stop_event.is_set():
             try:
-                data, overflowed = self._stream.read(int(self._sample_rate * 0.1))
+                data, overflowed = self._stream.read(read_size)
                 if overflowed:
                     print("[Audio] Warning: audio buffer overflow")
                 audio = data[:, 0].copy()
                 with self._lock:
                     if self._recording:
                         self._frames.append(audio)
-                        # 调试：每秒打印一次音频 RMS
-                        if len(self._frames) % 10 == 0:
+                        # 每20帧打印一次 RMS（约1秒）
+                        if len(self._frames) % 20 == 0:
                             rms = np.sqrt(np.mean(audio**2))
                             print(f"[Audio] read thread: RMS={rms:.6f}, frames={len(self._frames)}", flush=True)
                         now = time.time()
@@ -168,7 +173,7 @@ class AudioRecorder:
                             now - self._last_streaming_time >= self._streaming_interval):
                             self._last_streaming_time = now
                             if self._frames:
-                                chunk = np.concatenate(self._frames[-10:], axis=0).flatten()
+                                chunk = np.concatenate(self._frames[-20:], axis=0).flatten()
                                 threading.Thread(
                                     target=self._streaming_callback,
                                     args=(chunk,),
@@ -178,6 +183,7 @@ class AudioRecorder:
                 if not self._stop_event.is_set():
                     print(f"[Audio] Read error: {e}")
                 break
+        print(f"[Audio] Read thread stopped", flush=True)
 
     def reopen(self, device_id: int | None = None) -> bool:
         self._stop_event.set()

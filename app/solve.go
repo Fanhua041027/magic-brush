@@ -12,7 +12,17 @@ const MaxScreenshots = 3
 var screenshotBuffer []string
 var pendingUserMessage string
 
+// SetFollowUpActive 设置追问对话框状态（前端调用）
+func (a *App) SetFollowUpActive(active bool) {
+	a.followUpActive = active
+}
+
 func (a *App) TriggerScreenshot() {
+	// 追问对话框打开时，跳过全局截图（由追问对话框自己处理 F8）
+	if a.followUpActive {
+		return
+	}
+
 	cfg := a.configManager.Get()
 
 	if cfg.APIKey == "" {
@@ -74,6 +84,36 @@ func (a *App) RemoveLastScreenshot() {
 func (a *App) ClearScreenshots() {
 	screenshotBuffer = nil
 	a.EmitEvent("screenshots-cleared")
+}
+
+// TriggerFollowUpScreenshot 追问截图（F6）
+func (a *App) TriggerFollowUpScreenshot() string {
+	cfg := a.configManager.Get()
+
+	previewResult, err := a.GetScreenshotPreview(
+		cfg.CompressionQuality,
+		cfg.Sharpening,
+		cfg.Grayscale,
+		cfg.NoCompression,
+		cfg.ScreenshotMode,
+	)
+	if err != nil {
+		logger.Printf("追问截图失败: %v\n", err)
+		a.EmitEvent("toast", "截图失败: "+err.Error())
+		return ""
+	}
+
+	a.EmitEvent("followup-screenshot-taken", previewResult.Base64)
+	return previewResult.Base64
+}
+
+// StopThinking 停止当前思考/生成
+func (a *App) StopThinking() {
+	if a.taskManager.HasRunningTask() {
+		a.taskManager.CancelCurrentTask()
+		a.EmitEvent("toast", "已停止思考")
+		a.EmitEvent("thinking-stopped")
+	}
 }
 
 func (a *App) TriggerSend() {

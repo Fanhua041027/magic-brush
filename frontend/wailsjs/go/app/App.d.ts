@@ -14,6 +14,8 @@ export function ChatWithDeepSeekStreamWithContext(arg1:Array<Record<string, stri
 
 export function ChatWithScreenshot(arg1:string,arg2:string,arg3:string):Promise<void>;
 
+export function ChatWithScreenshotSync(arg1:string,arg2:string,arg3:string):Promise<string>;
+
 export function CheckMicrophoneAccess():Promise<number>;
 
 export function CheckScreenCapturePermission():Promise<boolean>;
@@ -88,6 +90,8 @@ export function SelectKBDirectory():Promise<string>;
 
 export function SelectResume():Promise<string>;
 
+export function SetFollowUpActive(arg1:boolean):Promise<void>;
+
 export function SetPendingUserMessage(arg1:string):Promise<void>;
 
 export function SetSTTDevice(arg1:number):Promise<Record<string, any>>;
@@ -106,6 +110,8 @@ export function StopRecordingKey():Promise<void>;
 
 export function StopSTTRecording():Promise<void>;
 
+export function StopThinking():Promise<void>;
+
 export function TestConnection(arg1:string,arg2:string):Promise<string>;
 
 export function ToggleClickThrough():Promise<void>;
@@ -115,6 +121,8 @@ export function ToggleSTT():Promise<Record<string, string>>;
 export function ToggleVisibility():Promise<void>;
 
 export function TriggerDeleteScreenshot():Promise<void>;
+
+export function TriggerFollowUpScreenshot():Promise<string>;
 
 export function TriggerScreenshot():Promise<void>;
 

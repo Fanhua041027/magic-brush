@@ -29,6 +29,8 @@ type App struct {
 	screenService   *screen.Service
 	solver          *solution.Solver
 	sidecar         *sidecar.Manager
+
+	followUpActive bool // 追问对话框是否打开
 }
 
 func NewApp() *App {

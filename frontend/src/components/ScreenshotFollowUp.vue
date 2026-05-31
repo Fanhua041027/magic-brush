@@ -68,12 +68,26 @@
                 <Icon name="send" :size="16" />
               </button>
             </div>
+            <div class="followup-actions">
+              <button class="followup-btn followup-btn-primary" @click="sendMessage" :disabled="!inputText.trim() || isLoading">
+                <Icon name="message-circle" :size="14" />
+                <span>追问</span>
+              </button>
+              <button v-if="isLoading" class="followup-btn followup-btn-danger" @click="stopThinking">
+                <Icon name="square" :size="14" />
+                <span>停止思考</span>
+              </button>
+              <button class="followup-btn followup-btn-secondary" @click="takeScreenshot">
+                <Icon name="camera" :size="14" />
+                <span>F6/F8 截图</span>
+              </button>
+            </div>
             <div class="followup-hint">
               <span v-if="isRecording" class="recording-hint">
                 <span class="recording-dot"></span>
                 录音中...松开左 Alt 结束
               </span>
-              <span v-else>Enter 发送 · 左 Alt 语音输入 · Esc 关闭</span>
+              <span v-else>Enter 追问 · F6/F8 截图 · 左 Alt 语音 · Esc 关闭</span>
             </div>
           </div>
         </div>
@@ -86,7 +100,7 @@
 import { ref, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import Icon from './Icon.vue'
 import { renderMarkdownWithLatex } from '../utils/markdown-latex'
-import { ChatWithScreenshot } from '../../wailsjs/go/app/App'
+import { ChatWithDeepSeek, ChatWithScreenshotSync, TriggerFollowUpScreenshot, StopThinking, SetFollowUpActive } from '../../wailsjs/go/app/App'
 
 const isVisible = ref(false)
 const isLoading = ref(false)
@@ -99,19 +113,19 @@ const inputText = ref('')
 const messagesRef = ref(null)
 const inputRef = ref(null)
 
-let streamContent = ''
-
 function renderMarkdown(text) {
   if (!text) return ''
   return renderMarkdownWithLatex(text)
 }
 
 function show(screenshotData, answer, context) {
+  console.log('[FollowUp] show() called', { hasScreenshot: !!screenshotData, hasAnswer: !!answer })
   screenshot.value = screenshotData || ''
   previousAnswer.value = answer || ''
   previousContext.value = context || ''
   messages.value = []
   isVisible.value = true
+  SetFollowUpActive(true)
   nextTick(() => {
     inputRef.value?.focus()
   })
@@ -120,7 +134,75 @@ function show(screenshotData, answer, context) {
 function close() {
   isVisible.value = false
   messages.value = []
-  streamContent = ''
+  SetFollowUpActive(false)
+}
+
+async function takeScreenshot() {
+  try {
+    const result = await TriggerFollowUpScreenshot()
+    if (result) {
+      screenshot.value = result
+      console.log('[FollowUp] Screenshot taken, auto-sending...')
+      // 截图后自动发送给模型
+      await sendScreenshotToModel(result)
+    }
+  } catch (error) {
+    console.error('Screenshot error:', error)
+  }
+}
+
+async function sendScreenshotToModel(screenshotBase64) {
+  if (isLoading.value) return
+
+  const userMsg = '请根据截图内容回答'
+  messages.value.push({
+    role: 'user',
+    content: '[截图] ' + userMsg,
+  })
+
+  isLoading.value = true
+  console.log('[FollowUp] Sending screenshot to model with image support...')
+
+  try {
+    // 使用 ChatWithScreenshotSync 发送图片给模型（非流式，支持图片）
+    const result = await ChatWithScreenshotSync(userMsg, screenshotBase64, previousContext.value)
+    console.log('[FollowUp] Got result:', result ? result.slice(0, 100) : 'null')
+    if (result) {
+      messages.value.push({
+        role: 'assistant',
+        content: result,
+      })
+      previousContext.value = result
+    } else {
+      messages.value.push({
+        role: 'assistant',
+        content: '模型未返回内容',
+      })
+    }
+  } catch (error) {
+    console.error('[FollowUp] Error:', error)
+    messages.value.push({
+      role: 'assistant',
+      content: `抱歉，发生了错误: ${error.message || '未知错误'}`,
+    })
+  } finally {
+    isLoading.value = false
+  }
+}
+
+async function stopThinking() {
+  try {
+    await StopThinking()
+    isLoading.value = false
+    // 如果有正在流式输出的内容，标记为完成
+    const lastMsg = messages.value[messages.value.length - 1]
+    if (lastMsg && lastMsg._streaming) {
+      lastMsg.content += '\n\n[已停止生成]'
+      delete lastMsg._streaming
+    }
+  } catch (error) {
+    console.error('Stop thinking error:', error)
+  }
 }
 
 async function sendMessage() {
@@ -134,90 +216,57 @@ async function sendMessage() {
   })
 
   isLoading.value = true
-  streamContent = ''
+  console.log('[FollowUp] Sending message:', text)
 
   try {
-    await ChatWithScreenshot(text, screenshot.value, previousContext.value)
+    // 直接使用非流式 ChatWithDeepSeek，构造包含上下文的消息
+    let fullMessage = text
+    if (previousContext.value) {
+      fullMessage = `[之前的回答]\n${previousContext.value.slice(0, 800)}\n\n[追问] ${text}`
+    }
+    console.log('[FollowUp] Calling ChatWithDeepSeek...')
+    const result = await ChatWithDeepSeek(fullMessage)
+    console.log('[FollowUp] Got result:', result ? result.slice(0, 100) : 'null')
+    if (result) {
+      messages.value.push({
+        role: 'assistant',
+        content: result,
+      })
+      // 更新上下文以便后续追问
+      previousContext.value = result
+    } else {
+      messages.value.push({
+        role: 'assistant',
+        content: '模型未返回内容',
+      })
+    }
   } catch (error) {
-    console.error('Follow-up error:', error)
+    console.error('[FollowUp] Error:', error)
     messages.value.push({
       role: 'assistant',
       content: `抱歉，发生了错误: ${error.message || '未知错误'}`,
     })
   } finally {
+    console.log('[FollowUp] Done, setting isLoading to false')
     isLoading.value = false
   }
 }
 
-function handleStreamChunk(chunk) {
-  if (!isLoading.value) return
-
-  streamContent += chunk
-
-  const lastMsg = messages.value[messages.value.length - 1]
-  if (lastMsg && lastMsg.role === 'assistant' && lastMsg._streaming) {
-    lastMsg.content = streamContent
-  } else {
-    messages.value.push({
-      role: 'assistant',
-      content: streamContent,
-      _streaming: true,
-    })
-  }
-
-  nextTick(() => {
-    if (messagesRef.value) {
-      messagesRef.value.scrollTop = messagesRef.value.scrollHeight
-    }
-  })
-}
-
-function handleStreamDone() {
-  const lastMsg = messages.value[messages.value.length - 1]
-  if (lastMsg && lastMsg._streaming) {
-    delete lastMsg._streaming
-  }
-  isLoading.value = false
-  streamContent = ''
-}
-
-function handleStreamError(error) {
-  const lastMsg = messages.value[messages.value.length - 1]
-  if (lastMsg && lastMsg._streaming) {
-    lastMsg.content += `\n\n[错误: ${error}]`
-    delete lastMsg._streaming
-  } else {
-    messages.value.push({
-      role: 'assistant',
-      content: `抱歉，发生了错误: ${error}`,
-    })
-  }
-  isLoading.value = false
-  streamContent = ''
-}
-
 function handleKeydown(e) {
+  console.log('[FollowUp] Keydown:', e.key, 'isVisible:', isVisible.value)
   if (e.key === 'Escape' && isVisible.value) {
     close()
+  }
+  // F6 或 F8 追问截图
+  if ((e.key === 'F6' || e.key === 'F8') && isVisible.value) {
+    console.log('[FollowUp] Taking screenshot...')
+    e.preventDefault()
+    e.stopPropagation()
+    takeScreenshot()
   }
 }
 
 onMounted(() => {
-  window.addEventListener('chat-stream-chunk', (e) => {
-    if (isVisible.value) {
-      handleStreamChunk(e.detail)
-    }
-  })
-  window.addEventListener('chat-stream-done', () => {
-    if (isVisible.value) {
-      handleStreamDone()
-    }
-  })
-  window.addEventListener('chat-stream-error', (e) => {
-    if (isVisible.value) {
-      handleStreamError(e.detail)
-    }
-  })
   window.addEventListener('stt-recording-started', () => {
     isRecording.value = true
   })
@@ -229,6 +278,15 @@ onMounted(() => {
       inputText.value = e.detail
       nextTick(() => {
         sendMessage()
+      })
+    }
+  })
+  window.addEventListener('followup-screenshot-taken', (e) => {
+    if (isVisible.value && e.detail) {
+      screenshot.value = e.detail
+      messages.value.push({
+        role: 'user',
+        content: '[已更新截图]',
       })
     }
   })
@@ -526,6 +584,66 @@ defineExpose({ show, close })
 .followup-send:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.followup-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.followup-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-default);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  background: var(--surface-elevated);
+  color: var(--text-primary);
+}
+
+.followup-btn:hover:not(:disabled) {
+  background: var(--surface-card-hover);
+}
+
+.followup-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.followup-btn-primary {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+}
+
+.followup-btn-primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.followup-btn-danger {
+  background: #ef4444;
+  color: white;
+  border-color: #ef4444;
+}
+
+.followup-btn-danger:hover:not(:disabled) {
+  background: #dc2626;
+}
+
+.followup-btn-secondary {
+  background: var(--surface-card);
+  color: var(--text-secondary);
+}
+
+.followup-btn-secondary:hover:not(:disabled) {
+  background: var(--surface-card-hover);
+  color: var(--text-primary);
 }
 
 .followup-hint {

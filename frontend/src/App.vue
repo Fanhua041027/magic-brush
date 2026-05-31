@@ -226,9 +226,13 @@ onMounted(() => {
     settingsStore.statusIcon = '✓'
     solution.handleSolution(data)
     // 解题完成后显示追问对话框
+    console.log('[App] Solution event received, currentScreenshot:', !!currentScreenshot, 'followUpRef:', !!followUpRef.value)
     if (currentScreenshot && followUpRef.value) {
       setTimeout(() => {
-        followUpRef.value.show(currentScreenshot, data, '')
+        // 传递解题结果作为上下文
+        const context = typeof data === 'string' ? data : (data?.content || JSON.stringify(data))
+        console.log('[App] Showing follow-up dialog...')
+        followUpRef.value.show(currentScreenshot, context, context)
         currentScreenshot = null
       }, 500)
     }
@@ -346,6 +350,16 @@ onMounted(() => {
 
   on('toast', (msg) => {
     ui.showToast(msg)
+  })
+
+  // 追问对话中的截图支持
+  window.addEventListener('followup-screenshot', () => {
+    // 触发截图
+    api.triggerScreenshot().then((screenshotData) => {
+      if (screenshotData) {
+        window.dispatchEvent(new CustomEvent('followup-screenshot-taken', { detail: screenshotData }))
+      }
+    })
   })
 
   on('open-chat', () => {

@@ -22,6 +22,10 @@ export function ChatWithScreenshot(arg1, arg2, arg3) {
   return window['go']['app']['App']['ChatWithScreenshot'](arg1, arg2, arg3);
 }
 
+export function ChatWithScreenshotSync(arg1, arg2, arg3) {
+  return window['go']['app']['App']['ChatWithScreenshotSync'](arg1, arg2, arg3);
+}
+
 export function CheckMicrophoneAccess() {
   return window['go']['app']['App']['CheckMicrophoneAccess']();
 }
@@ -170,6 +174,10 @@ export function SelectResume() {
   return window['go']['app']['App']['SelectResume']();
 }
 
+export function SetFollowUpActive(arg1) {
+  return window['go']['app']['App']['SetFollowUpActive'](arg1);
+}
+
 export function SetPendingUserMessage(arg1) {
   return window['go']['app']['App']['SetPendingUserMessage'](arg1);
 }
@@ -206,6 +214,10 @@ export function StopSTTRecording() {
   return window['go']['app']['App']['StopSTTRecording']();
 }
 
+export function StopThinking() {
+  return window['go']['app']['App']['StopThinking']();
+}
+
 export function TestConnection(arg1, arg2) {
   return window['go']['app']['App']['TestConnection'](arg1, arg2);
 }
@@ -224,6 +236,10 @@ export function ToggleVisibility() {
 
 export function TriggerDeleteScreenshot() {
   return window['go']['app']['App']['TriggerDeleteScreenshot']();
+}
+
+export function TriggerFollowUpScreenshot() {
+  return window['go']['app']['App']['TriggerFollowUpScreenshot']();
 }
 
 export function TriggerScreenshot() {

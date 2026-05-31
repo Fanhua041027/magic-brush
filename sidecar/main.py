@@ -203,7 +203,7 @@ def stt_start_streaming():
                         text = qwen_asr_local.recognize(audio_chunk)
                     elif stt_service_type == "qwen_cloud" and qwen_stt:
                         # 使用千问云端 STT
-                        text = qwen_stt.recognize(audio_chunk)
+                        text = qwen_stt.recognize(audio_chunk, sample_rate=recorder.sample_rate)
                     elif transcriber:
                         # 使用本地 Whisper
                         text = transcriber.transcribe(audio_chunk)
@@ -347,7 +347,7 @@ def stt_stop():
             text = qwen_asr_local.recognize(audio)
         elif stt_service_type == "qwen_cloud" and qwen_stt:
             # 使用千问云端 STT
-            text = qwen_stt.recognize(audio)
+            text = qwen_stt.recognize(audio, sample_rate=recorder.sample_rate)
         elif transcriber:
             # 使用本地 Whisper
             print(f"[STT] transcribing with {transcriber.device}...", flush=True)

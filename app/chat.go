@@ -15,6 +15,11 @@ const (
 	deepseekModel   = "deepseek-chat"
 )
 
+// 支持视觉的模型配置
+const (
+	deepseekVisionModel = "deepseek-v4-flash"  // DeepSeek V4 Flash 支持视觉
+)
+
 // ChatWithDeepSeek 使用 DeepSeek API 进行对话（非流式）
 func (a *App) ChatWithDeepSeek(message string) string {
 	apiKey := "sk-eeab470faa664cb8a3c954554354e711"
@@ -240,17 +245,13 @@ func (a *App) ChatWithScreenshot(message string, screenshotBase64 string, previo
 		openai.SystemMessage(systemPrompt),
 	}
 
-	// 如果有截图，添加图片消息
+	// DeepSeek 不支持图片，只发送文本
+	// 如果有截图，在消息中说明
+	userMessage := message
 	if screenshotBase64 != "" {
-		messages = append(messages, openai.UserMessage([]openai.ChatCompletionContentPartUnionParam{
-			openai.TextContentPart(message),
-			openai.ImageContentPart(openai.ChatCompletionContentPartImageImageURLParam{
-				URL: screenshotBase64,
-			}),
-		}))
-	} else {
-		messages = append(messages, openai.UserMessage(message))
+		userMessage = message + "\n\n[注：用户已截图，截图内容已在之前的对话中提供]"
 	}
+	messages = append(messages, openai.UserMessage(userMessage))
 
 	stream := client.Chat.Completions.NewStreaming(ctx, openai.ChatCompletionNewParams{
 		Model:    deepseekModel,
@@ -276,6 +277,97 @@ func (a *App) ChatWithScreenshot(message string, screenshotBase64 string, previo
 	}
 
 	a.EmitEvent("chat-stream-done")
+}
+
+// ChatWithScreenshotSync 使用用户配置的 API 进行截图追问对话（非流式，支持图片）
+func (a *App) ChatWithScreenshotSync(message string, screenshotBase64 string, previousContext string) string {
+	// 使用用户配置的 API Key 和模型（与首次 F8 截图相同）
+	cfg := a.configManager.Get()
+	apiKey := cfg.APIKey
+	if apiKey == "" {
+		apiKey = "sk-eeab470faa664cb8a3c954554354e711"
+	}
+
+	baseURL := cfg.BaseURL
+	if baseURL == "" {
+		baseURL = "https://api.openai.com/v1"  // 与 NewOpenAIAdapter 默认值相同
+	}
+
+	client := openai.NewClient(
+		option.WithAPIKey(apiKey),
+		option.WithBaseURL(baseURL),
+	)
+
+	ctx := context.Background()
+
+	// 搜索知识库
+	kbContext := ""
+	if a.sidecar != nil && a.sidecar.IsRunning() {
+		result, err := a.sidecar.Client().KBSearch(message, 3)
+		if err == nil && len(result.Results) > 0 {
+			kbContext = "\n\n【参考知识库】\n"
+			for _, r := range result.Results {
+				kbContext += fmt.Sprintf("- %s: %s\n", r.Header, r.Content[:min(200, len(r.Content))])
+			}
+		}
+	}
+
+	// 获取简历内容
+	resumeContext := ""
+	if cfg.ResumeContent != "" {
+		resumeContext = "\n\n【用户简历】\n" + cfg.ResumeContent
+	}
+
+	systemPrompt := "你是一个有用的AI助手。用户会发送截图和问题，请根据截图内容回答问题。请用中文回答。"
+	if resumeContext != "" {
+		systemPrompt += resumeContext
+		systemPrompt += "\n\n请根据用户的简历内容回答问题，如果问题与简历相关，请结合简历信息进行回答。"
+	}
+	if kbContext != "" {
+		systemPrompt += kbContext
+	}
+	if previousContext != "" {
+		systemPrompt += "\n\n【之前的对话上下文】\n" + previousContext
+	}
+
+	messages := []openai.ChatCompletionMessageParamUnion{
+		openai.SystemMessage(systemPrompt),
+	}
+
+	// 构建用户消息，支持图片（与首次 F8 截图相同的格式）
+	if screenshotBase64 != "" {
+		// 使用多模态消息格式发送图片
+		messages = append(messages, openai.UserMessage([]openai.ChatCompletionContentPartUnionParam{
+			openai.TextContentPart(message),
+			openai.ImageContentPart(openai.ChatCompletionContentPartImageImageURLParam{
+				URL: screenshotBase64,
+			}),
+		}))
+	} else {
+		messages = append(messages, openai.UserMessage(message))
+	}
+
+	// 使用用户配置的模型（与首次 F8 截图相同）
+	modelToUse := cfg.Model
+	if modelToUse == "" {
+		modelToUse = deepseekModel
+	}
+
+	resp, err := client.Chat.Completions.New(ctx, openai.ChatCompletionNewParams{
+		Model:    modelToUse,
+		Messages: messages,
+	})
+
+	if err != nil {
+		logger.Printf("[Chat] ChatWithScreenshotSync error: %v", err)
+		return fmt.Sprintf("抱歉，请求失败: %v", err)
+	}
+
+	if len(resp.Choices) > 0 {
+		return resp.Choices[0].Message.Content
+	}
+
+	return "抱歉，没有收到回复"
 }
 
 func min(a, b int) int {
