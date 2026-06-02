@@ -75,7 +75,7 @@ func (a *App) Startup(ctx context.Context) {
 	// Start Python sidecar
 	a.sidecar = sidecar.NewManager(18765)
 	go func() {
-		sttService := "local_whisper" // 默认使用本地 Whisper
+		sttService := "qwen_cloud" // 使用千问云端 STT
 		if err := a.sidecar.Start(cfg.STTModel, cfg.STTDevice, cfg.STTLanguage, cfg.STTSensitivity, sttService); err != nil {
 			logger.Printf("[Sidecar] Start failed: %v", err)
 		} else if cfg.KBPath != "" {

@@ -194,28 +194,21 @@ def stt_start_streaming():
             return jsonify(error.to_dict()), 409
 
         def streaming_callback(audio_chunk):
-            """流式转写回调"""
+            """流式转写回调 — 将音频送入 Qwen STT 缓冲区"""
             try:
                 if audio_chunk.size > 0:
-                    text = ""
-                    if stt_service_type == "qwen_local" and qwen_asr_local:
-                        # 使用千问本地 ASR
+                    if stt_service_type == "qwen_cloud" and qwen_stt:
+                        qwen_stt.add_audio_chunk(audio_chunk)
+                    elif stt_service_type == "qwen_local" and qwen_asr_local:
                         text = qwen_asr_local.recognize(audio_chunk)
-                    elif stt_service_type == "qwen_cloud" and qwen_stt:
-                        # 使用千问云端 STT
-                        text = qwen_stt.recognize(audio_chunk, sample_rate=recorder.sample_rate)
+                        if text.strip():
+                            broadcast_ws_message({"type": "stt-streaming", "text": text})
+                            streaming_results.append(text)
                     elif transcriber:
-                        # 使用本地 Whisper
                         text = transcriber.transcribe(audio_chunk)
-
-                    if text.strip():
-                        # 通过 WebSocket 发送转写结果
-                        broadcast_ws_message({
-                            "type": "stt-streaming",
-                            "text": text
-                        })
-                        # 也存储到全局变量（兼容旧版本）
-                        streaming_results.append(text)
+                        if text.strip():
+                            broadcast_ws_message({"type": "stt-streaming", "text": text})
+                            streaming_results.append(text)
             except Exception as e:
                 error = error_handler.handle_error(e, "streaming_callback")
                 broadcast_ws_message({
@@ -228,6 +221,14 @@ def stt_start_streaming():
         try:
             recorder.start_recording()
             is_recording = True
+            # 启动 Qwen STT 流式识别
+            if stt_service_type == "qwen_cloud" and qwen_stt:
+                def on_streaming_result(text):
+                    if text.strip():
+                        broadcast_ws_message({"type": "stt-streaming", "text": text})
+                        streaming_results.append(text)
+                qwen_stt.start_streaming(on_streaming_result, sample_rate=recorder.sample_rate)
+                print("[STT] Qwen streaming started", flush=True)
         except Exception as e:
             error = error_handler.handle_error(e, "stt_start_streaming")
             return jsonify(error.to_dict()), 500
@@ -329,6 +330,12 @@ def stt_stop():
             )
             return jsonify(error.to_dict()), 409
         try:
+            # 停止 Qwen STT 流式识别
+            if stt_service_type == "qwen_cloud" and qwen_stt and qwen_stt._is_streaming:
+                final_text = qwen_stt.stop_streaming()
+                if final_text.strip():
+                    broadcast_ws_message({"type": "stt-streaming", "text": final_text})
+                    streaming_results.append(final_text)
             audio = recorder.stop_recording()
             is_recording = False
         except Exception as e:
@@ -336,36 +343,21 @@ def stt_stop():
             error = error_handler.handle_error(e, "stt_stop")
             return jsonify(error.to_dict()), 500
 
-    if audio.size == 0:
-        return jsonify({"text": ""})
+    # 获取最终转写结果
+    text = ""
+    # 优先使用流式结果
+    if streaming_results:
+        text = "".join(streaming_results)
+        streaming_results.clear()
+    elif stt_service_type == "qwen_cloud" and qwen_stt and audio.size > 0:
+        text = qwen_stt.recognize(audio, sample_rate=recorder.sample_rate)
+    elif stt_service_type == "qwen_local" and qwen_asr_local and audio.size > 0:
+        text = qwen_asr_local.recognize(audio)
+    elif transcriber and audio.size > 0:
+        text = transcriber.transcribe(audio)
 
-    try:
-        text = ""
-        print(f"[STT] stop: audio_size={audio.size}, rms={np.sqrt(np.mean(audio**2)):.6f}", flush=True)
-        if stt_service_type == "qwen_local" and qwen_asr_local:
-            # 使用千问本地 ASR
-            text = qwen_asr_local.recognize(audio)
-        elif stt_service_type == "qwen_cloud" and qwen_stt:
-            # 使用千问云端 STT
-            text = qwen_stt.recognize(audio, sample_rate=recorder.sample_rate)
-        elif transcriber:
-            # 使用本地 Whisper
-            print(f"[STT] transcribing with {transcriber.device}...", flush=True)
-            text = transcriber.transcribe(audio)
-            print(f"[STT] result: [{text}]", flush=True)
-
-        return jsonify({"text": text})
-    except Exception as e:
-        error = error_handler.handle_error(e, "transcribe")
-        # 如果失败，尝试其他服务
-        if stt_service_type != "local_whisper" and transcriber:
-            try:
-                text = transcriber.transcribe(audio)
-                return jsonify({"text": text})
-            except Exception as e2:
-                error2 = error_handler.handle_error(e2, "transcribe_fallback")
-                return jsonify(error2.to_dict()), 500
-        return jsonify(error.to_dict()), 500
+    print(f"[STT] stop: text={text!r}", flush=True)
+    return jsonify({"text": text})
 
 
 @app.route("/api/stt/record", methods=["POST"])
