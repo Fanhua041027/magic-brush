@@ -1,10 +1,10 @@
 <template>
   <Teleport to="body">
     <Transition name="interview-fade">
-      <div v-if="chatStore.isVisible" class="interview-overlay" :style="overlayStyle" @click.self="close">
-        <div class="interview-container" :style="containerStyle">
-          <!-- ═══ Top Bar ═══ -->
-          <header class="interview-topbar">
+      <div v-if="chatStore.isVisible" class="interview-overlay" :style="overlayStyle" @mousedown="onOverlayClick">
+        <div class="interview-container" :style="[containerStyle, posStyle]">
+          <!-- ═══ Top Bar (Drag Handle) ═══ -->
+          <header class="interview-topbar" @mousedown.prevent="startDrag">
             <div class="topbar-left">
               <span class="timer-display">
                 <Icon name="clock" :size="13" />
@@ -20,22 +20,29 @@
               </span>
             </div>
             <div class="topbar-right">
-              <div class="opacity-control" :class="{ active: showOpacitySlider }">
-                <button class="tb-btn" @click="showOpacitySlider = !showOpacitySlider" title="窗口透明度（越大越透明）">
+              <div class="opacity-control">
+                <button class="tb-btn" @click="showBgSlider = !showBgSlider" title="背景透明度（越大越透明）">
                   <Icon name="sun" :size="13" />
                 </button>
                 <Transition name="slide-fade">
-                  <div v-if="showOpacitySlider" class="opacity-slider-wrap">
-                    <input
-                      type="range"
-                      class="opacity-slider"
-                      min="0"
-                      max="100"
-                      step="1"
-                      v-model.number="transparencyLevel"
-                      @input="saveOpacity"
-                    />
+                  <div v-if="showBgSlider" class="opacity-slider-wrap">
+                    <span class="slider-label">背景</span>
+                    <input type="range" class="opacity-slider" min="0" max="100" step="1"
+                      v-model.number="transparencyLevel" @input="saveOpacity" />
                     <span class="opacity-value">{{ transparencyLevel }}%</span>
+                  </div>
+                </Transition>
+              </div>
+              <div class="opacity-control">
+                <button class="tb-btn" @click="showFontSlider = !showFontSlider" title="文字透明度">
+                  <Icon name="type" :size="13" />
+                </button>
+                <Transition name="slide-fade">
+                  <div v-if="showFontSlider" class="opacity-slider-wrap">
+                    <span class="slider-label">文字</span>
+                    <input type="range" class="opacity-slider" min="0" max="100" step="1"
+                      v-model.number="fontOpacity" @input="saveFontOpacity" />
+                    <span class="opacity-value">{{ fontOpacity }}%</span>
                   </div>
                 </Transition>
               </div>
@@ -52,7 +59,7 @@
           </header>
 
           <!-- ═══ Main Content: 三栏布局 ═══ -->
-          <main class="interview-main">
+          <main class="interview-main" :style="textStyle">
             <!-- ─── 左栏：对话转录 ─── -->
             <section class="col-transcript">
               <div class="col-header">
@@ -208,7 +215,7 @@
 </template>
 
 <script setup>
-import { ref, watch, nextTick, onMounted, onUnmounted, computed } from 'vue'
+import { ref, watch, nextTick, onMounted, onUnmounted, computed, reactive } from 'vue'
 import Icon from './Icon.vue'
 import { useChatStore } from '../stores/chat'
 import { useVoiceStore } from '../stores/voice'
@@ -252,12 +259,14 @@ function stopTimer() {
   }
 }
 
-// ── 透明度控制 ──────────────────────────────────────────────
+// ── 透明度控制 + 窗口拖动 ──────────────────────────────────
 const OPACITY_KEY = 'magic-brush-interview-opacity'
-const showOpacitySlider = ref(false)
-// 透明度 0=不透明 100=完全透明
-// 背景 alpha = 1 - 透明度/100，文字始终保持高对比度
+const FONT_OPACITY_KEY = 'magic-brush-interview-font-opacity'
+const POS_KEY = 'magic-brush-interview-pos'
+const showBgSlider = ref(false)
+const showFontSlider = ref(false)
 const transparencyLevel = ref(8)
+const fontOpacity = ref(100)
 const t = () => 1 - transparencyLevel.value / 100
 const containerStyle = computed(() => ({
   background: `rgba(20, 22, 30, ${t()})`,
@@ -271,26 +280,84 @@ const overlayStyle = computed(() => {
     WebkitBackdropFilter: `blur(${blurPx}px)`,
   }
 })
+const textStyle = computed(() => ({
+  opacity: fontOpacity.value / 100,
+  transition: 'opacity 0.2s ease',
+}))
 
 function loadOpacity() {
   try {
     const saved = localStorage.getItem(OPACITY_KEY)
     if (saved) {
       const val = parseFloat(saved)
-      // 兼容旧格式（0.30-0.98 alpha 值）
       if (val > 1) {
         transparencyLevel.value = Math.max(0, Math.min(100, val))
       } else if (val >= 0.3 && val <= 0.98) {
         transparencyLevel.value = Math.round((1 - val) * 100)
       }
     }
+    const fontSaved = localStorage.getItem(FONT_OPACITY_KEY)
+    if (fontSaved) {
+      const v = parseFloat(fontSaved)
+      if (v >= 0 && v <= 100) fontOpacity.value = v
+    }
   } catch (e) { /* ignore */ }
 }
 function saveOpacity() {
   try { localStorage.setItem(OPACITY_KEY, String(transparencyLevel.value)) } catch (e) { /* ignore */ }
 }
+function saveFontOpacity() {
+  try { localStorage.setItem(FONT_OPACITY_KEY, String(fontOpacity.value)) } catch (e) { /* ignore */ }
+}
 
-// ── 对话转录 ────────────────────────────────────────────────
+// ── 窗口拖动 ──────────────────────────────────────────────
+const dialogPos = reactive({ x: 0, y: 0 })
+const posStyle = computed(() => ({
+  left: `${dialogPos.x}px`,
+  top: `${dialogPos.y}px`,
+}))
+let isDragging = false
+let dragOffset = { x: 0, y: 0 }
+
+function loadPosition() {
+  try {
+    const saved = localStorage.getItem(POS_KEY)
+    if (saved) {
+      const p = JSON.parse(saved)
+      if (typeof p.x === 'number' && typeof p.y === 'number') {
+        dialogPos.x = p.x; dialogPos.y = p.y
+        return
+      }
+    }
+  } catch (e) { /* ignore */ }
+  dialogPos.x = Math.max(0, (window.innerWidth - 860) / 2)
+  dialogPos.y = Math.max(0, (window.innerHeight - 640) / 2)
+}
+function savePosition() {
+  try { localStorage.setItem(POS_KEY, JSON.stringify({ x: dialogPos.x, y: dialogPos.y })) } catch (e) { /* ignore */ }
+}
+
+function startDrag(e) {
+  isDragging = true
+  const rect = document.querySelector('.interview-container')?.getBoundingClientRect()
+  dragOffset.x = rect ? e.clientX - rect.left : e.clientX - dialogPos.x
+  dragOffset.y = rect ? e.clientY - rect.top : e.clientY - dialogPos.y
+  document.addEventListener('mousemove', onDrag)
+  document.addEventListener('mouseup', stopDrag)
+}
+function onDrag(e) {
+  if (!isDragging) return
+  dialogPos.x = e.clientX - dragOffset.x
+  dialogPos.y = e.clientY - dragOffset.y
+  dialogPos.x = Math.max(-400, Math.min(window.innerWidth - 200, dialogPos.x))
+  dialogPos.y = Math.max(-20, Math.min(window.innerHeight - 100, dialogPos.y))
+}
+function stopDrag() {
+  isDragging = false
+  document.removeEventListener('mousemove', onDrag)
+  document.removeEventListener('mouseup', stopDrag)
+  savePosition()
+}
 const transcripts = ref([])
 
 function addTranscript(speaker, content) {
@@ -353,10 +420,15 @@ function close() {
   chatStore.hide()
 }
 
+function onOverlayClick(e) {
+  if (e.target === e.currentTarget) close()
+}
+
 // ── 事件监听 ────────────────────────────────────────────────
 onMounted(() => {
   startTimer()
   loadOpacity()
+  loadPosition()
 
   // 流式输出
   window.addEventListener('chat-stream-chunk', onStreamChunk)
@@ -419,12 +491,12 @@ watch(() => chatStore.isVisible, (v) => {
   position: fixed;
   inset: 0;
   z-index: 1000;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  pointer-events: none;
 }
 
 .interview-container {
+  position: fixed;
+  z-index: 1001;
   width: 860px;
   max-width: 94vw;
   height: 640px;
@@ -435,6 +507,8 @@ watch(() => chatStore.isVisible, (v) => {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  pointer-events: auto;
+  user-select: none;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
   backdrop-filter: blur(20px);
 }
@@ -449,7 +523,9 @@ watch(() => chatStore.isVisible, (v) => {
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
   flex-shrink: 0;
   height: 40px;
+  cursor: grab;
 }
+.interview-topbar:active { cursor: grabbing; }
 
 .topbar-left, .topbar-right { display: flex; align-items: center; gap: 6px; }
 .topbar-center { display: flex; align-items: center; gap: 8px; }
@@ -543,6 +619,14 @@ watch(() => chatStore.isVisible, (v) => {
   min-width: 30px;
   text-align: right;
   font-variant-numeric: tabular-nums;
+}
+
+.slider-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.25);
+  margin-right: 4px;
+  letter-spacing: 0.3px;
 }
 .slide-fade-enter-active { transition: all 0.2s ease; }
 .slide-fade-leave-active { transition: all 0.15s ease; }

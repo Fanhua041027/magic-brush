@@ -253,6 +253,13 @@
       <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
     </template>
 
+    <!-- Type / Font -->
+    <template v-else-if="name === 'type'">
+      <polyline points="4 7 4 4 20 4 20 7" />
+      <line x1="9" y1="20" x2="15" y2="20" />
+      <line x1="12" y1="4" x2="12" y2="20" />
+    </template>
+
     <!-- Eye (visible) -->
     <template v-else-if="name === 'eye'">
       <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
