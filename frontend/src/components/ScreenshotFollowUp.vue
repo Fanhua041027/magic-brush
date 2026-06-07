@@ -100,7 +100,7 @@
 import { ref, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import Icon from './Icon.vue'
 import { renderMarkdownWithLatex } from '../utils/markdown-latex'
-import { ChatWithDeepSeek, ChatWithScreenshotSync, TriggerFollowUpScreenshot, StopThinking, SetFollowUpActive } from '../../wailsjs/go/app/App'
+import { ChatWithDeepSeek, ChatWithDeepSeekStream, ChatWithScreenshotSync, TriggerFollowUpScreenshot, StopThinking, SetFollowUpActive } from '../../wailsjs/go/app/App'
 
 const isVisible = ref(false)
 const isLoading = ref(false)
@@ -112,6 +112,7 @@ const messages = ref([])
 const inputText = ref('')
 const messagesRef = ref(null)
 const inputRef = ref(null)
+const currentStreamContent = ref('')
 
 function renderMarkdown(text) {
   if (!text) return ''
@@ -216,29 +217,44 @@ async function sendMessage() {
   })
 
   isLoading.value = true
+  currentStreamContent.value = ''
   console.log('[FollowUp] Sending message:', text)
 
   try {
-    // 直接使用非流式 ChatWithDeepSeek，构造包含上下文的消息
+    // 构造包含上下文的消息
     let fullMessage = text
     if (previousContext.value) {
       fullMessage = `[之前的回答]\n${previousContext.value.slice(0, 800)}\n\n[追问] ${text}`
     }
-    console.log('[FollowUp] Calling ChatWithDeepSeek...')
-    const result = await ChatWithDeepSeek(fullMessage)
-    console.log('[FollowUp] Got result:', result ? result.slice(0, 100) : 'null')
-    if (result) {
-      messages.value.push({
-        role: 'assistant',
-        content: result,
-      })
-      // 更新上下文以便后续追问
-      previousContext.value = result
+    console.log('[FollowUp] Calling ChatWithDeepSeekStream...')
+
+    // 使用流式输出
+    await ChatWithDeepSeekStream(fullMessage)
+
+    // 流式输出完成后，内容已经通过事件处理
+    // 如果没有收到流式事件，使用普通模式作为备选
+    if (currentStreamContent.value === '') {
+      console.log('[FollowUp] No stream events received, falling back to sync mode')
+      const result = await ChatWithDeepSeek(fullMessage)
+      if (result) {
+        messages.value.push({
+          role: 'assistant',
+          content: result,
+        })
+        // 更新上下文以便后续追问
+        previousContext.value = result
+      } else {
+        messages.value.push({
+          role: 'assistant',
+          content: '模型未返回内容',
+        })
+      }
     } else {
-      messages.value.push({
-        role: 'assistant',
-        content: '模型未返回内容',
-      })
+      // 流式输出完成，更新上下文
+      const lastMsg = messages.value[messages.value.length - 1]
+      if (lastMsg && lastMsg.role === 'assistant') {
+        previousContext.value = lastMsg.content
+      }
     }
   } catch (error) {
     console.error('[FollowUp] Error:', error)
@@ -249,7 +265,58 @@ async function sendMessage() {
   } finally {
     console.log('[FollowUp] Done, setting isLoading to false')
     isLoading.value = false
+    currentStreamContent.value = ''
   }
+}
+
+function handleStreamChunk(chunk) {
+  if (!isLoading.value) return
+
+  currentStreamContent.value += chunk
+
+  // 更新或添加助手消息
+  const lastMsg = messages.value[messages.value.length - 1]
+  if (lastMsg && lastMsg.role === 'assistant' && lastMsg._streaming) {
+    lastMsg.content = currentStreamContent.value
+  } else {
+    messages.value.push({
+      role: 'assistant',
+      content: currentStreamContent.value,
+      _streaming: true,
+    })
+  }
+
+  // 自动滚动到底部
+  nextTick(() => {
+    if (messagesRef.value) {
+      messagesRef.value.scrollTop = messagesRef.value.scrollHeight
+    }
+  })
+}
+
+function handleStreamDone() {
+  const lastMsg = messages.value[messages.value.length - 1]
+  if (lastMsg && lastMsg._streaming) {
+    delete lastMsg._streaming
+  }
+  isLoading.value = false
+  currentStreamContent.value = ''
+}
+
+function handleStreamError(error) {
+  console.error('Stream error:', error)
+  const lastMsg = messages.value[messages.value.length - 1]
+  if (lastMsg && lastMsg._streaming) {
+    lastMsg.content += `\n\n[错误: ${error}]`
+    delete lastMsg._streaming
+  } else {
+    messages.value.push({
+      role: 'assistant',
+      content: `抱歉，发生了错误: ${error}`,
+    })
+  }
+  isLoading.value = false
+  currentStreamContent.value = ''
 }
 
 function handleKeydown(e) {
@@ -267,6 +334,20 @@ function handleKeydown(e) {
 }
 
 onMounted(() => {
+  // 监听流式输出事件
+  window.addEventListener('chat-stream-chunk', (e) => {
+    if (!isVisible.value) return
+    handleStreamChunk(e.detail)
+  })
+  window.addEventListener('chat-stream-done', () => {
+    if (!isVisible.value) return
+    handleStreamDone()
+  })
+  window.addEventListener('chat-stream-error', (e) => {
+    if (!isVisible.value) return
+    handleStreamError(e.detail)
+  })
+
   window.addEventListener('stt-recording-started', () => {
     isRecording.value = true
   })
