@@ -80,20 +80,22 @@ export const useChatStore = defineStore('chat', () => {
   async function sendMessage(text) {
     if (!text.trim() || isLoading.value) return
 
-    // 添加用户消息
     addMessage('user', text)
     isLoading.value = true
     currentStreamContent.value = ''
 
     try {
-      // 使用流式输出
+      // 流式输出：Go 后端逐字推送 chat-stream-chunk 事件
       await ChatWithDeepSeekStream(text)
 
-      // 流式输出完成后，内容已经通过事件处理
-      // 如果没有收到流式事件，使用普通模式作为备选
-      if (currentStreamContent.value === '') {
+      // 检查流式是否真的产生了助手消息
+      const hasAssistantMsg = messages.value.some(
+        m => m.role === 'assistant' && !m._streaming && m.content.length > 0
+      )
+      if (!hasAssistantMsg) {
+        // 流式无输出，降级为非流式
         const result = await ChatWithDeepSeek(text)
-        if (result && !currentStreamContent.value) {
+        if (result) {
           addMessage('assistant', result)
         }
       }
