@@ -61,7 +61,7 @@
                         <Icon name="x" :size="12" />
                       </button>
                     </div>
-                    <div class="hp-body">
+                    <div class="hp-body" @mousedown="onTopbarMouseDown">
                       <div v-if="chatStore.savedConversations.length === 0" class="hp-empty">
                         暂无历史对话
                       </div>
