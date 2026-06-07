@@ -131,3 +131,7 @@ export function TriggerSend():Promise<void>;
 export function TriggerSolve():Promise<void>;
 
 export function UpdateSettings(arg1:string):Promise<string>;
+
+export function IsStandaloneInterview():Promise<boolean>;
+
+export function OpenStandaloneInterview():Promise<void>;

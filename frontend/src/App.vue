@@ -1,15 +1,23 @@
 <template>
-  <TopBar @openSettings="settingsStore.openSettings" />
+  <!-- 独立面试窗口模式：只显示 AI 辅助面试面板 -->
+  <template v-if="isStandalone">
+    <StandaloneInterviewPanel />
+  </template>
 
-  <WelcomeView v-if="!ui.hasStarted && solution.history.length === 0" />
-  <SolveView v-else />
+  <!-- 正常主窗口模式 -->
+  <template v-else>
+    <TopBar @openSettings="settingsStore.openSettings" />
 
-  <ScreenshotDock />
-  <KBPanel @select-result="onKBSelect" />
-  <SettingsModal />
-  <ChatDialog />
-  <ScreenshotFollowUp ref="followUpRef" />
-  <TutorialWizard />
+    <WelcomeView v-if="!ui.hasStarted && solution.history.length === 0" />
+    <SolveView v-else />
+
+    <ScreenshotDock />
+    <KBPanel @select-result="onKBSelect" />
+    <SettingsModal />
+    <ChatDialog />
+    <ScreenshotFollowUp ref="followUpRef" />
+    <TutorialWizard />
+  </template>
 
   <Teleport to="body">
     <Transition name="overlay-fade">
@@ -64,6 +72,7 @@ import KBPanel from './components/KBPanel.vue'
 import ChatDialog from './components/ChatDialog.vue'
 import ScreenshotFollowUp from './components/ScreenshotFollowUp.vue'
 import TutorialWizard from './components/TutorialWizard.vue'
+import StandaloneInterviewPanel from './components/StandaloneInterviewPanel.vue'
 
 import { useUIStore } from './stores/ui'
 import { useSettingsStore } from './stores/settings'
@@ -82,6 +91,8 @@ const solution = useSolutionStore()
 const voice = useVoiceStore()
 const chatStore = useChatStore()
 const tutorial = useTutorialStore()
+
+const isStandalone = ref(false)
 
 const followUpRef = ref(null)
 let pendingSolveCallback = null
@@ -111,7 +122,16 @@ function onKBSelect(item) {
   console.log('KB selected:', item)
 }
 
-onMounted(() => {
+onMounted(async () => {
+  // 检测是否为独立面试窗口模式
+  try {
+    const standalone = await api.isStandaloneInterview()
+    if (standalone) {
+      isStandalone.value = true
+      return // 独立模式不执行后续初始化
+    }
+  } catch (e) { /* ignore */ }
+
   initCodeBlockInteractions()
 
   // 初始化 WebSocket 连接

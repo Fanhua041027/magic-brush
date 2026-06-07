@@ -257,3 +257,11 @@ export function TriggerSolve() {
 export function UpdateSettings(arg1) {
   return window['go']['app']['App']['UpdateSettings'](arg1);
 }
+
+export function IsStandaloneInterview() {
+  return window['go']['app']['App']['IsStandaloneInterview']();
+}
+
+export function OpenStandaloneInterview() {
+  return window['go']['app']['App']['OpenStandaloneInterview']();
+}

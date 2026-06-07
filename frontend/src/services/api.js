@@ -44,6 +44,8 @@ import {
   ChatWithDeepSeekStream,
   ChatWithDeepSeekStreamWithContext,
   ChatWithScreenshot,
+  IsStandaloneInterview,
+  OpenStandaloneInterview,
 } from '../../wailsjs/go/app/App'
 
 import { Quit } from '../../wailsjs/runtime/runtime'
@@ -106,4 +108,6 @@ export const api = {
   chatWithDeepSeekStream: (message) => ChatWithDeepSeekStream(message),
   chatWithDeepSeekStreamWithContext: (messages) => ChatWithDeepSeekStreamWithContext(messages),
   chatWithScreenshot: (message, screenshot, context) => ChatWithScreenshot(message, screenshot, context),
+  isStandaloneInterview: () => IsStandaloneInterview(),
+  openStandaloneInterview: () => OpenStandaloneInterview(),
 }

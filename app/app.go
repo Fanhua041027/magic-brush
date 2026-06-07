@@ -12,6 +12,8 @@ import (
 	"ai-assistant/pkg/state"
 	"ai-assistant/pkg/task"
 	"context"
+	"os"
+	"os/exec"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -30,22 +32,29 @@ type App struct {
 	solver          *solution.Solver
 	sidecar         *sidecar.Manager
 
-	followUpActive bool // 追问对话框是否打开
+	followUpActive  bool // 追问对话框是否打开
+	standaloneMode  bool // 是否为独立面试窗口模式
 }
 
-func NewApp() *App {
+func NewApp(mode string) *App {
 	configManager := config.NewConfigManager()
 
 	return &App{
-		configManager: configManager,
-		stateManager:  state.NewStateManager(),
-		taskManager:   task.NewTaskCoordinator(),
-		screenService: screen.NewService(),
+		configManager:  configManager,
+		stateManager:   state.NewStateManager(),
+		taskManager:    task.NewTaskCoordinator(),
+		screenService:  screen.NewService(),
+		standaloneMode: mode == "--standalone-interview",
 	}
 }
 
 func (a *App) Startup(ctx context.Context) {
 	a.ctx = ctx
+
+	if a.standaloneMode {
+		a.startupStandalone()
+		return
+	}
 
 	if err := a.configManager.Load(); err != nil {
 		logger.Printf("加载配置失败: %v", err)
@@ -75,7 +84,7 @@ func (a *App) Startup(ctx context.Context) {
 	// Start Python sidecar
 	a.sidecar = sidecar.NewManager(18765)
 	go func() {
-		sttService := "qwen_cloud" // 使用千问云端 STT
+		sttService := "qwen_cloud"
 		if err := a.sidecar.Start(cfg.STTModel, cfg.STTDevice, cfg.STTLanguage, cfg.STTSensitivity, sttService); err != nil {
 			logger.Printf("[Sidecar] Start failed: %v", err)
 		} else if cfg.KBPath != "" {
@@ -90,6 +99,38 @@ func (a *App) Startup(ctx context.Context) {
 
 	a.configManager.Subscribe(a.onConfigChanged)
 	a.stateManager.UpdateInitStatus(state.StatusReady)
+}
+
+func (a *App) startupStandalone() {
+	logger.Println("[Standalone] 启动独立面试窗口")
+	if err := a.configManager.Load(); err != nil {
+		logger.Printf("加载配置失败: %v", err)
+	}
+	// 独立窗口仅连接已有的 sidecar，不重新启动
+	a.sidecar = sidecar.NewManager(18765)
+	// 设置窗口标题
+	runtime.WindowSetTitle(a.ctx, "AI 辅助面试")
+	logger.Println("[Standalone] 独立面试窗口就绪")
+}
+
+// IsStandaloneInterview 返回是否独立面试窗口模式
+func (a *App) IsStandaloneInterview() bool {
+	return a.standaloneMode
+}
+
+// OpenStandaloneInterview 打开独立面试窗口（主窗口调用）
+func (a *App) OpenStandaloneInterview() {
+	selfPath, err := os.Executable()
+	if err != nil {
+		logger.Printf("[Standalone] 获取执行路径失败: %v", err)
+		return
+	}
+	cmd := exec.Command(selfPath, "--standalone-interview")
+	if err := cmd.Start(); err != nil {
+		logger.Printf("[Standalone] 启动失败: %v", err)
+	} else {
+		logger.Printf("[Standalone] 已启动独立面试窗口 (PID %d)", cmd.Process.Pid)
+	}
 }
 
 func (a *App) onConfigChanged(newConfig config.Config, oldConfig config.Config) {
@@ -120,6 +161,10 @@ func (a *App) onConfigChanged(newConfig config.Config, oldConfig config.Config) 
 }
 
 func (a *App) OnShutdown(ctx context.Context) {
+	if a.standaloneMode {
+		logger.Println("[Standalone] 关闭独立面试窗口")
+		return
+	}
 	if a.shortcutService != nil {
 		a.shortcutService.Stop()
 	}

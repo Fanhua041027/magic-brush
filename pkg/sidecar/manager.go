@@ -74,6 +74,10 @@ func (m *Manager) Client() *Client {
 	return m.client
 }
 
+func (m *Manager) Port() int {
+	return m.port
+}
+
 func (m *Manager) IsRunning() bool {
 	if m.externalRunning {
 		return m.client.Health() == nil

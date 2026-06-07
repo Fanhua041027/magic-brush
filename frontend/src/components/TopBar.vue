@@ -20,6 +20,10 @@
           <Icon name="book-open" :size="15" />
         </button>
 
+        <button class="bar-btn" @click="openStandaloneWindow" title="弹出独立面试窗口">
+          <Icon name="external-link" :size="14" />
+        </button>
+
         <div class="bar-divider" />
 
         <div class="shortcuts-hint">
@@ -106,6 +110,11 @@ const ui = useUIStore()
 const settingsStore = useSettingsStore()
 const chatStore = useChatStore()
 const tutorial = useTutorialStore()
+import { OpenStandaloneInterview } from '../../wailsjs/go/app/App'
+
+function openStandaloneWindow() {
+  OpenStandaloneInterview().catch(e => console.error('Failed to open standalone:', e))
+}
 
 const statusClass = computed(() => {
   const text = settingsStore.statusText || ''
