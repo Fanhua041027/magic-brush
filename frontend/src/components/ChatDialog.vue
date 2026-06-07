@@ -401,9 +401,10 @@ let longPressTimer = null
 const LONG_PRESS_MS = 150
 
 function loadPosition() {
-  // 每次打开都居中显示在主窗口中间
+  // 默认放在主窗口正下方（底部居中）
+  const topBarH = 40
   dialogPos.x = Math.max(0, (window.innerWidth - 860) / 2)
-  dialogPos.y = Math.max(0, (window.innerHeight - 640) / 2)
+  dialogPos.y = Math.max(topBarH, window.innerHeight - 640 - 16)
 }
 
 function onTopbarMouseDown(e) {
