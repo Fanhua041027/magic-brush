@@ -4,7 +4,7 @@
       <div v-if="chatStore.isVisible" class="interview-overlay" :style="overlayStyle" @mousedown="onOverlayClick">
         <div class="interview-container" :style="[containerStyle, posStyle]">
           <!-- ═══ Top Bar (Drag Handle) ═══ -->
-          <header class="interview-topbar" @mousedown.prevent="startDrag">
+          <header class="interview-topbar" @mousedown="onTopbarMouseDown">
             <div class="topbar-left">
               <span class="timer-display">
                 <Icon name="clock" :size="13" />
@@ -310,14 +310,17 @@ function saveFontOpacity() {
   try { localStorage.setItem(FONT_OPACITY_KEY, String(fontOpacity.value)) } catch (e) { /* ignore */ }
 }
 
-// ── 窗口拖动 ──────────────────────────────────────────────
+// ── 窗口拖动（长按触发） ──────────────────────────────────
 const dialogPos = reactive({ x: 0, y: 0 })
 const posStyle = computed(() => ({
   left: `${dialogPos.x}px`,
   top: `${dialogPos.y}px`,
 }))
 let isDragging = false
+let isDraggableReady = false
 let dragOffset = { x: 0, y: 0 }
+let longPressTimer = null
+const LONG_PRESS_MS = 150
 
 function loadPosition() {
   try {
@@ -337,14 +340,48 @@ function savePosition() {
   try { localStorage.setItem(POS_KEY, JSON.stringify({ x: dialogPos.x, y: dialogPos.y })) } catch (e) { /* ignore */ }
 }
 
-function startDrag(e) {
+function onTopbarMouseDown(e) {
+  // 点击按钮时不触发拖动
+  if (e.target.closest('.topbar-right, .tb-btn, .opacity-control, .opacity-slider-wrap')) return
+  isDraggableReady = false
+  longPressTimer = setTimeout(() => {
+    isDraggableReady = true
+    beginDrag(e)
+  }, LONG_PRESS_MS)
+  document.addEventListener('mousemove', onTopbarMove)
+  document.addEventListener('mouseup', cancelLongPress)
+}
+
+function onTopbarMove(e) {
+  if (!isDraggableReady) {
+    // 鼠标移动超过阈值，立即开始拖动
+    if (Math.abs(e.movementX) > 3 || Math.abs(e.movementY) > 3) {
+      clearTimeout(longPressTimer)
+      isDraggableReady = true
+      beginDrag(e)
+    }
+  } else if (isDragging) {
+    onDrag(e)
+  }
+}
+
+function cancelLongPress() {
+  clearTimeout(longPressTimer)
+  isDraggableReady = false
+  document.removeEventListener('mousemove', onTopbarMove)
+  document.removeEventListener('mouseup', cancelLongPress)
+}
+
+function beginDrag(e) {
   isDragging = true
   const rect = document.querySelector('.interview-container')?.getBoundingClientRect()
   dragOffset.x = rect ? e.clientX - rect.left : e.clientX - dialogPos.x
   dragOffset.y = rect ? e.clientY - rect.top : e.clientY - dialogPos.y
+  document.removeEventListener('mousemove', onTopbarMove)
   document.addEventListener('mousemove', onDrag)
   document.addEventListener('mouseup', stopDrag)
 }
+
 function onDrag(e) {
   if (!isDragging) return
   dialogPos.x = e.clientX - dragOffset.x
@@ -352,8 +389,10 @@ function onDrag(e) {
   dialogPos.x = Math.max(-400, Math.min(window.innerWidth - 200, dialogPos.x))
   dialogPos.y = Math.max(-20, Math.min(window.innerHeight - 100, dialogPos.y))
 }
+
 function stopDrag() {
   isDragging = false
+  isDraggableReady = false
   document.removeEventListener('mousemove', onDrag)
   document.removeEventListener('mouseup', stopDrag)
   savePosition()
