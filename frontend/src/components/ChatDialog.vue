@@ -84,6 +84,9 @@
                   </div>
                 </Transition>
               </div>
+              <button class="tb-btn" @click="openStandaloneWindow" title="弹出为独立窗口">
+                <Icon name="external-link" :size="13" />
+              </button>
               <button class="tb-btn" @click="chatStore.exportHistory" title="导出当前对话">
                 <Icon name="download" :size="14" />
               </button>
@@ -269,7 +272,7 @@ import { useSettingsStore } from '../stores/settings'
 import { useUIStore } from '../stores/ui'
 import { renderMarkdownWithLatex } from '../utils/markdown-latex'
 import { api } from '../services/api'
-import { CancelRunningTask } from '../../wailsjs/go/app/App'
+import { CancelRunningTask, OpenStandaloneInterview } from '../../wailsjs/go/app/App'
 
 const chatStore = useChatStore()
 const voiceStore = useVoiceStore()
@@ -539,6 +542,10 @@ async function stopThinking() {
   } catch (e) {
     console.error('Stop thinking error:', e)
   }
+}
+
+function openStandaloneWindow() {
+  OpenStandaloneInterview().catch(e => console.error('Failed to open standalone:', e))
 }
 
 function close() {
