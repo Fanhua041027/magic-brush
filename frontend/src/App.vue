@@ -330,9 +330,10 @@ onMounted(() => {
     voice.transcribedText = text || ''
     // 触发自定义事件
     window.dispatchEvent(new CustomEvent('stt-transcribed', { detail: text }))
-    // 语音转写后自动打开对话框
+    // 语音转写后：如果对话框已打开则填入输入框，不自动打开新对话
     if (text && text.trim()) {
-      chatStore.show()
+      // 不再自动调用 chatStore.show()
+      // 仅在对话框已打开时填入输入框（由 ChatDialog 的 stt-transcribed 监听处理）
     }
   })
 
