@@ -254,8 +254,6 @@
               </div>
             </section>
           </main>
-          <!-- 拖拽调整大小的手柄 -->
-          <div class="resize-handle" @mousedown.prevent="startResize"></div>
         </div>
       </div>
     </Transition>
@@ -316,57 +314,40 @@ const showBgSlider = ref(false)
 const showFontSlider = ref(false)
 const showHistoryPanel = ref(false)
 
-// ── 窗口尺寸 ──────────────────────────────────────────────
+// ── 窗口尺寸（CSS resize 原生实现，仅用于持久化） ────────
 const SIZE_KEY = 'magic-brush-interview-size'
-const dialogWidth = ref(860)
-const dialogHeight = ref(640)
-let isResizing = false
-let resizeStart = { x: 0, y: 0, w: 0, h: 0 }
+let resizeObserver = null
 
 function loadSize() {
   try {
     const saved = localStorage.getItem(SIZE_KEY)
     if (saved) {
       const { w, h } = JSON.parse(saved)
-      if (w >= 520) dialogWidth.value = w
-      if (h >= 400) dialogHeight.value = h
+      const el = document.querySelector('.interview-container')
+      if (el && w >= 520 && h >= 400) {
+        el.style.width = w + 'px'
+        el.style.height = h + 'px'
+      }
     }
   } catch (e) { /* ignore */ }
 }
 function saveSize() {
-  try { localStorage.setItem(SIZE_KEY, JSON.stringify({ w: dialogWidth.value, h: dialogHeight.value })) } catch (e) { /* ignore */ }
+  const el = document.querySelector('.interview-container')
+  if (el) {
+    try { localStorage.setItem(SIZE_KEY, JSON.stringify({ w: el.offsetWidth, h: el.offsetHeight })) } catch (e) { /* ignore */ }
+  }
 }
-
-function startResize(e) {
-  isResizing = true
-  resizeStart = { x: e.clientX, y: e.clientY, w: dialogWidth.value, h: dialogHeight.value }
-  document.addEventListener('mousemove', onResize)
-  document.addEventListener('mouseup', stopResize)
-  document.body.style.cursor = 'nwse-resize'
-  document.body.style.userSelect = 'none'
-}
-function onResize(e) {
-  if (!isResizing) return
-  const newW = Math.max(520, resizeStart.w + (e.clientX - resizeStart.x))
-  const newH = Math.max(400, resizeStart.h + (e.clientY - resizeStart.y))
-  dialogWidth.value = newW
-  dialogHeight.value = newH
-}
-function stopResize() {
-  isResizing = false
-  document.removeEventListener('mousemove', onResize)
-  document.removeEventListener('mouseup', stopResize)
-  document.body.style.cursor = ''
-  document.body.style.userSelect = ''
-  saveSize()
+function setupResizeObserver() {
+  const el = document.querySelector('.interview-container')
+  if (!el) return
+  resizeObserver = new ResizeObserver(() => { saveSize() })
+  resizeObserver.observe(el)
 }
 const transparencyLevel = ref(8)
 const fontOpacity = ref(100)
 const t = () => 1 - transparencyLevel.value / 100
 const containerStyle = computed(() => ({
   background: `rgba(20, 22, 30, ${t()})`,
-  width: `${dialogWidth.value}px`,
-  height: `${dialogHeight.value}px`,
 }))
 const overlayStyle = computed(() => {
   // 自由悬浮模式：不显示遮罩，点击穿透
@@ -585,7 +566,8 @@ onMounted(() => {
   startTimer()
   loadOpacity()
   loadPosition()
-  loadSize()
+  // 延迟一帧等待 DOM 渲染完成后初始化尺寸
+  nextTick(() => { loadSize(); setupResizeObserver() })
 
   // 流式输出
   window.addEventListener('chat-stream-chunk', onStreamChunk)
@@ -616,6 +598,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   stopTimer()
+  if (resizeObserver) resizeObserver.disconnect()
   window.removeEventListener('chat-stream-chunk', onStreamChunk)
   window.removeEventListener('chat-stream-done', onStreamDone)
   window.removeEventListener('chat-stream-error', onStreamError)
@@ -664,6 +647,11 @@ watch(() => chatStore.isVisible, (v) => {
   user-select: none;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
   backdrop-filter: blur(20px);
+  width: 860px;
+  height: 640px;
+  min-width: 520px;
+  min-height: 400px;
+  resize: both;
 }
 
 /* ═══ Top Bar ═══ */
@@ -1288,29 +1276,4 @@ watch(() => chatStore.isVisible, (v) => {
 .interview-fade-enter-from .interview-container,
 .interview-fade-leave-to .interview-container { transform: scale(0.95) translateY(10px); opacity: 0; }
 
-/* ─── 拖拽调整大小手柄 ─── */
-.resize-handle {
-  position: absolute;
-  bottom: 0;
-  right: 0;
-  width: 16px;
-  height: 16px;
-  cursor: nwse-resize;
-  z-index: 5;
-}
-.resize-handle::after {
-  content: '';
-  position: absolute;
-  bottom: 3px;
-  right: 3px;
-  width: 8px;
-  height: 8px;
-  border-right: 2px solid rgba(255, 255, 255, 0.15);
-  border-bottom: 2px solid rgba(255, 255, 255, 0.15);
-  border-radius: 0 0 3px 0;
-  transition: border-color 0.15s;
-}
-.resize-handle:hover::after {
-  border-color: rgba(255, 255, 255, 0.4);
-}
 </style>
