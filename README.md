@@ -332,6 +332,10 @@ wails build -skipbindings
 
 <br/>
 
+[![Star History Chart](https://api.star-history.com/svg?repos=Fanhua041027/magic-brush&type=Date&theme=dark)](https://star-history.com/#Fanhua041027/magic-brush&Date)
+
+<br/>
+
 **Made with ❤️ for interview warriors**
 
 </div>
