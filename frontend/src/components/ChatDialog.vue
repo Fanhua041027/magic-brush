@@ -21,7 +21,7 @@
             </div>
             <div class="topbar-right">
               <div class="opacity-control" :class="{ active: showOpacitySlider }">
-                <button class="tb-btn" @click="showOpacitySlider = !showOpacitySlider" title="调节透明度">
+                <button class="tb-btn" @click="showOpacitySlider = !showOpacitySlider" title="窗口透明度（越大越透明）">
                   <Icon name="sun" :size="13" />
                 </button>
                 <Transition name="slide-fade">
@@ -29,13 +29,13 @@
                     <input
                       type="range"
                       class="opacity-slider"
-                      min="0.3"
-                      max="0.98"
-                      step="0.02"
-                      v-model.number="panelOpacity"
+                      min="0"
+                      max="100"
+                      step="1"
+                      v-model.number="transparencyLevel"
                       @input="saveOpacity"
                     />
-                    <span class="opacity-value">{{ Math.round(panelOpacity * 100) }}%</span>
+                    <span class="opacity-value">{{ transparencyLevel }}%</span>
                   </div>
                 </Transition>
               </div>
@@ -255,9 +255,10 @@ function stopTimer() {
 // ── 透明度控制 ──────────────────────────────────────────────
 const OPACITY_KEY = 'magic-brush-interview-opacity'
 const showOpacitySlider = ref(false)
-const panelOpacity = ref(0.92)
+// 透明度 0=完全不透明 100=完全透明，映射到背景 alpha = 1 - 透明度/100
+const transparencyLevel = ref(8)
 const containerStyle = computed(() => ({
-  background: `rgba(24, 26, 35, ${panelOpacity.value})`,
+  background: `rgba(24, 26, 35, ${1 - transparencyLevel.value / 100})`,
 }))
 
 function loadOpacity() {
@@ -265,12 +266,17 @@ function loadOpacity() {
     const saved = localStorage.getItem(OPACITY_KEY)
     if (saved) {
       const val = parseFloat(saved)
-      if (val >= 0.3 && val <= 0.98) panelOpacity.value = val
+      // 兼容旧格式（0.30-0.98 alpha 值）
+      if (val > 1) {
+        transparencyLevel.value = Math.max(0, Math.min(100, val))
+      } else if (val >= 0.3 && val <= 0.98) {
+        transparencyLevel.value = Math.round((1 - val) * 100)
+      }
     }
   } catch (e) { /* ignore */ }
 }
 function saveOpacity() {
-  try { localStorage.setItem(OPACITY_KEY, String(panelOpacity.value)) } catch (e) { /* ignore */ }
+  try { localStorage.setItem(OPACITY_KEY, String(transparencyLevel.value)) } catch (e) { /* ignore */ }
 }
 
 // ── 对话转录 ────────────────────────────────────────────────
