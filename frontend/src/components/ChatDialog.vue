@@ -328,8 +328,8 @@ function loadSize() {
     const saved = localStorage.getItem(SIZE_KEY)
     if (saved) {
       const { w, h } = JSON.parse(saved)
-      if (w >= 520 && w <= 1600) dialogWidth.value = w
-      if (h >= 400 && h <= 1200) dialogHeight.value = h
+      if (w >= 520) dialogWidth.value = w
+      if (h >= 400) dialogHeight.value = h
     }
   } catch (e) { /* ignore */ }
 }
@@ -347,8 +347,8 @@ function startResize(e) {
 }
 function onResize(e) {
   if (!isResizing) return
-  const newW = Math.max(520, Math.min(1600, resizeStart.w + (e.clientX - resizeStart.x)))
-  const newH = Math.max(400, Math.min(1200, resizeStart.h + (e.clientY - resizeStart.y)))
+  const newW = Math.max(520, resizeStart.w + (e.clientX - resizeStart.x))
+  const newH = Math.max(400, resizeStart.h + (e.clientY - resizeStart.y))
   dialogWidth.value = newW
   dialogHeight.value = newH
 }
