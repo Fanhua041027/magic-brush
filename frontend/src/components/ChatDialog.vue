@@ -2,7 +2,7 @@
   <Teleport to="body">
     <Transition name="interview-fade">
       <div v-if="chatStore.isVisible" class="interview-overlay" @click.self="close">
-        <div class="interview-container">
+        <div class="interview-container" :style="containerStyle">
           <!-- ═══ Top Bar ═══ -->
           <header class="interview-topbar">
             <div class="topbar-left">
@@ -20,6 +20,25 @@
               </span>
             </div>
             <div class="topbar-right">
+              <div class="opacity-control" :class="{ active: showOpacitySlider }">
+                <button class="tb-btn" @click="showOpacitySlider = !showOpacitySlider" title="调节透明度">
+                  <Icon name="sun" :size="13" />
+                </button>
+                <Transition name="slide-fade">
+                  <div v-if="showOpacitySlider" class="opacity-slider-wrap">
+                    <input
+                      type="range"
+                      class="opacity-slider"
+                      min="0.3"
+                      max="0.98"
+                      step="0.02"
+                      v-model.number="panelOpacity"
+                      @input="saveOpacity"
+                    />
+                    <span class="opacity-value">{{ Math.round(panelOpacity * 100) }}%</span>
+                  </div>
+                </Transition>
+              </div>
               <button class="tb-btn" @click="chatStore.clearHistory" title="清除对话">
                 <Icon name="trash" :size="14" />
               </button>
@@ -233,6 +252,27 @@ function stopTimer() {
   }
 }
 
+// ── 透明度控制 ──────────────────────────────────────────────
+const OPACITY_KEY = 'magic-brush-interview-opacity'
+const showOpacitySlider = ref(false)
+const panelOpacity = ref(0.92)
+const containerStyle = computed(() => ({
+  background: `rgba(24, 26, 35, ${panelOpacity.value})`,
+}))
+
+function loadOpacity() {
+  try {
+    const saved = localStorage.getItem(OPACITY_KEY)
+    if (saved) {
+      const val = parseFloat(saved)
+      if (val >= 0.3 && val <= 0.98) panelOpacity.value = val
+    }
+  } catch (e) { /* ignore */ }
+}
+function saveOpacity() {
+  try { localStorage.setItem(OPACITY_KEY, String(panelOpacity.value)) } catch (e) { /* ignore */ }
+}
+
 // ── 对话转录 ────────────────────────────────────────────────
 const transcripts = ref([])
 
@@ -299,6 +339,7 @@ function close() {
 // ── 事件监听 ────────────────────────────────────────────────
 onMounted(() => {
   startTimer()
+  loadOpacity()
 
   // 流式输出
   window.addEventListener('chat-stream-chunk', onStreamChunk)
@@ -442,6 +483,56 @@ watch(() => chatStore.isVisible, (v) => {
 }
 .tb-btn:hover { background: rgba(255, 255, 255, 0.06); color: rgba(255, 255, 255, 0.6); }
 .tb-close:hover { background: rgba(239, 68, 68, 0.1); color: #ef4444; }
+
+/* ─── 透明度滑块 ─── */
+.opacity-control { position: relative; display: flex; align-items: center; }
+.opacity-slider-wrap {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: rgba(30, 32, 42, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+  z-index: 10;
+  white-space: nowrap;
+}
+.opacity-slider {
+  width: 80px;
+  height: 4px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 2px;
+  outline: none;
+  cursor: pointer;
+}
+.opacity-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px; height: 14px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  border: 2px solid rgba(255,255,255,0.15);
+  cursor: pointer;
+  transition: box-shadow 0.15s;
+}
+.opacity-slider::-webkit-slider-thumb:hover { box-shadow: 0 0 12px rgba(99,102,241,0.4); }
+.opacity-value {
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.4);
+  min-width: 30px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.slide-fade-enter-active { transition: all 0.2s ease; }
+.slide-fade-leave-active { transition: all 0.15s ease; }
+.slide-fade-enter-from,
+.slide-fade-leave-to { opacity: 0; transform: translateY(-4px); }
 
 /* ═══ Main: 三栏 ═══ */
 .interview-main {
