@@ -312,7 +312,6 @@ function stopTimer() {
 // ── 透明度控制 + 窗口拖动 ──────────────────────────────────
 const OPACITY_KEY = 'magic-brush-interview-opacity'
 const FONT_OPACITY_KEY = 'magic-brush-interview-font-opacity'
-const POS_KEY = 'magic-brush-interview-pos'
 const showBgSlider = ref(false)
 const showFontSlider = ref(false)
 const showHistoryPanel = ref(false)
@@ -402,21 +401,9 @@ let longPressTimer = null
 const LONG_PRESS_MS = 150
 
 function loadPosition() {
-  try {
-    const saved = localStorage.getItem(POS_KEY)
-    if (saved) {
-      const p = JSON.parse(saved)
-      if (typeof p.x === 'number' && typeof p.y === 'number') {
-        dialogPos.x = p.x; dialogPos.y = p.y
-        return
-      }
-    }
-  } catch (e) { /* ignore */ }
+  // 每次打开都居中显示在主窗口中间
   dialogPos.x = Math.max(0, (window.innerWidth - 860) / 2)
   dialogPos.y = Math.max(0, (window.innerHeight - 640) / 2)
-}
-function savePosition() {
-  try { localStorage.setItem(POS_KEY, JSON.stringify({ x: dialogPos.x, y: dialogPos.y })) } catch (e) { /* ignore */ }
 }
 
 function onTopbarMouseDown(e) {
@@ -476,7 +463,6 @@ function stopDrag() {
   isDraggableReady = false
   document.removeEventListener('mousemove', onDrag)
   document.removeEventListener('mouseup', stopDrag)
-  savePosition()
 }
 const transcripts = ref([])
 
