@@ -12,7 +12,7 @@
       <div class="bar-right" style="--wails-draggable: no-drag">
         <STTButton />
 
-        <button class="bar-btn chat-btn" @click="chatStore.toggle()" title="AI 对话 (F7)">
+        <button class="bar-btn chat-btn" @click="chatStore.toggle()" title="AI 辅助面试 (F7)">
           <Icon name="message-square" :size="15" />
         </button>
 

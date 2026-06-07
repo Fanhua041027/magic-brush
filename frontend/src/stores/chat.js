@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, reactive, watch } from 'vue'
-import { ChatWithDeepSeek, ChatWithDeepSeekStream } from '../../wailsjs/go/app/App'
+import { ChatWithDeepSeek, ChatWithDeepSeekStream, ChatWithScreenshotSync } from '../../wailsjs/go/app/App'
 
 // 本地存储键名
 const STORAGE_KEY = 'magic-brush-chat-history'
@@ -149,6 +149,27 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   // 导出对话历史
+  async function sendMessageWithScreenshot(text, screenshotBase64) {
+    if (!text.trim() || isLoading.value) return
+
+    addMessage('user', text + ' [附截图]')
+    isLoading.value = true
+
+    try {
+      const result = await ChatWithScreenshotSync(text, screenshotBase64, '')
+      if (result) {
+        addMessage('assistant', result)
+      } else {
+        addMessage('assistant', '模型未返回内容')
+      }
+    } catch (error) {
+      console.error('Chat with screenshot error:', error)
+      addMessage('assistant', `抱歉，发生了错误: ${error.message || '未知错误'}`)
+    } finally {
+      isLoading.value = false
+    }
+  }
+
   function exportHistory() {
     const data = {
       exportTime: new Date().toISOString(),
@@ -201,6 +222,7 @@ export const useChatStore = defineStore('chat', () => {
     clearHistory,
     addMessage,
     sendMessage,
+    sendMessageWithScreenshot,
     handleStreamChunk,
     handleStreamDone,
     handleStreamError,
