@@ -1,7 +1,7 @@
 <template>
   <Teleport to="body">
     <Transition name="interview-fade">
-      <div v-if="chatStore.isVisible" class="interview-overlay" :style="overlayStyle" @mousedown="onOverlayClick">
+      <div v-if="chatStore.isVisible" class="interview-overlay" :style="overlayStyle">
         <div class="interview-container" :style="[containerStyle, posStyle]">
           <!-- ═══ Top Bar (Drag Handle) ═══ -->
           <header class="interview-topbar" @mousedown="onTopbarMouseDown">
@@ -272,12 +272,10 @@ const containerStyle = computed(() => ({
   background: `rgba(20, 22, 30, ${t()})`,
 }))
 const overlayStyle = computed(() => {
-  const a = Math.max(0, 0.6 - transparencyLevel.value / 100 * 0.58)
-  const blurPx = Math.max(1, 10 - transparencyLevel.value / 12)
+  // 自由悬浮模式：不显示遮罩，点击穿透
   return {
-    background: `rgba(0, 0, 0, ${a})`,
-    backdropFilter: `blur(${blurPx}px)`,
-    WebkitBackdropFilter: `blur(${blurPx}px)`,
+    background: 'transparent',
+    pointerEvents: 'none',
   }
 })
 const textStyle = computed(() => ({
@@ -386,8 +384,10 @@ function onDrag(e) {
   if (!isDragging) return
   dialogPos.x = e.clientX - dragOffset.x
   dialogPos.y = e.clientY - dragOffset.y
-  dialogPos.x = Math.max(-400, Math.min(window.innerWidth - 200, dialogPos.x))
-  dialogPos.y = Math.max(-20, Math.min(window.innerHeight - 100, dialogPos.y))
+  // 无边界限制，可随意拖到桌面任意位置
+  // 只做极端的越界保护，防止完全拖出视线无法拉回
+  dialogPos.x = Math.max(-window.innerWidth + 100, Math.min(window.innerWidth - 100, dialogPos.x))
+  dialogPos.y = Math.max(-window.innerHeight + 60, Math.min(window.innerHeight - 60, dialogPos.y))
 }
 
 function stopDrag() {
@@ -459,10 +459,6 @@ function close() {
   chatStore.hide()
 }
 
-function onOverlayClick(e) {
-  if (e.target === e.currentTarget) close()
-}
-
 // ── 事件监听 ────────────────────────────────────────────────
 onMounted(() => {
   startTimer()
@@ -529,13 +525,13 @@ watch(() => chatStore.isVisible, (v) => {
 .interview-overlay {
   position: fixed;
   inset: 0;
-  z-index: 1000;
+  z-index: 999;
   pointer-events: none;
 }
 
 .interview-container {
   position: fixed;
-  z-index: 1001;
+  z-index: 1000;
   width: 860px;
   max-width: 94vw;
   height: 640px;
