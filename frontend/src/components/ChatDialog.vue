@@ -1,7 +1,7 @@
 <template>
   <Teleport to="body">
     <Transition name="interview-fade">
-      <div v-if="chatStore.isVisible" class="interview-overlay" @click.self="close">
+      <div v-if="chatStore.isVisible" class="interview-overlay" :style="overlayStyle" @click.self="close">
         <div class="interview-container" :style="containerStyle">
           <!-- ═══ Top Bar ═══ -->
           <header class="interview-topbar">
@@ -255,11 +255,22 @@ function stopTimer() {
 // ── 透明度控制 ──────────────────────────────────────────────
 const OPACITY_KEY = 'magic-brush-interview-opacity'
 const showOpacitySlider = ref(false)
-// 透明度 0=完全不透明 100=完全透明，映射到背景 alpha = 1 - 透明度/100
+// 透明度 0=不透明 100=完全透明
+// 背景 alpha = 1 - 透明度/100，文字始终保持高对比度
 const transparencyLevel = ref(8)
+const t = () => 1 - transparencyLevel.value / 100
 const containerStyle = computed(() => ({
-  background: `rgba(24, 26, 35, ${1 - transparencyLevel.value / 100})`,
+  background: `rgba(20, 22, 30, ${t()})`,
 }))
+const overlayStyle = computed(() => {
+  const a = Math.max(0, 0.6 - transparencyLevel.value / 100 * 0.58)
+  const blurPx = Math.max(1, 10 - transparencyLevel.value / 12)
+  return {
+    background: `rgba(0, 0, 0, ${a})`,
+    backdropFilter: `blur(${blurPx}px)`,
+    WebkitBackdropFilter: `blur(${blurPx}px)`,
+  }
+})
 
 function loadOpacity() {
   try {
@@ -411,8 +422,6 @@ watch(() => chatStore.isVisible, (v) => {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.6);
-  backdrop-filter: blur(10px);
 }
 
 .interview-container {
@@ -556,6 +565,8 @@ watch(() => chatStore.isVisible, (v) => {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  min-height: 0;
+  overflow: hidden;
   background: rgba(0, 0, 0, 0.15);
 }
 
@@ -784,11 +795,6 @@ watch(() => chatStore.isVisible, (v) => {
 @keyframes tdot-bounce { 0%,80%,100% { transform: scale(0.6); opacity: 0.3; } 40% { transform: scale(1); opacity: 0.8; } }
 
 /* ═══ 右栏：输入与控制 ═══ */
-.col-input {
-  display: flex;
-  flex-direction: column;
-}
-
 /* ─── Quick Actions ─── */
 .quick-actions {
   display: flex;
