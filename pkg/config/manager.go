@@ -3,6 +3,7 @@ package config
 import (
 	"ai-assistant/pkg/common"
 	"ai-assistant/pkg/logger"
+	"ai-assistant/pkg/shortcut"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -65,6 +66,18 @@ func (cm *ConfigManager) Load() error {
 			logger.Printf("解密配置文件失败 (使用默认配置): %v", err)
 		} else if err := json.Unmarshal(plain, &cm.config); err != nil {
 			logger.Printf("解析配置文件失败: %v", err)
+		}
+	}
+
+	// 确保默认快捷键都存在（防止新增快捷键被旧配置覆盖）
+	defaultShortcuts := NewDefaultConfig().Shortcuts
+	for action, binding := range defaultShortcuts {
+		if _, exists := cm.config.Shortcuts[action]; !exists {
+			if cm.config.Shortcuts == nil {
+				cm.config.Shortcuts = make(map[string]shortcut.KeyBinding)
+			}
+			cm.config.Shortcuts[action] = binding
+			logger.Printf("添加快捷键: %s -> %s", action, binding.KeyName)
 		}
 	}
 
