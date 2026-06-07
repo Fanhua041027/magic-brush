@@ -16,6 +16,10 @@
           <Icon name="message-square" :size="15" />
         </button>
 
+        <button class="bar-btn" @click="tutorial.show()" title="教程向导">
+          <Icon name="book-open" :size="15" />
+        </button>
+
         <div class="bar-divider" />
 
         <div class="shortcuts-hint">
@@ -91,6 +95,7 @@ import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { useUIStore } from '../stores/ui'
 import { useSettingsStore } from '../stores/settings'
 import { useChatStore } from '../stores/chat'
+import { useTutorialStore } from '../stores/tutorial'
 import Icon from './Icon.vue'
 import ThemeToggle from './ThemeToggle.vue'
 import STTButton from './STTButton.vue'
@@ -100,6 +105,7 @@ defineEmits(['openSettings'])
 const ui = useUIStore()
 const settingsStore = useSettingsStore()
 const chatStore = useChatStore()
+const tutorial = useTutorialStore()
 
 const statusClass = computed(() => {
   const text = settingsStore.statusText || ''

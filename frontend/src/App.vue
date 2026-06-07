@@ -9,6 +9,7 @@
   <SettingsModal />
   <ChatDialog />
   <ScreenshotFollowUp ref="followUpRef" />
+  <TutorialWizard />
 
   <Teleport to="body">
     <Transition name="overlay-fade">
@@ -62,12 +63,14 @@ import Icon from './components/Icon.vue'
 import KBPanel from './components/KBPanel.vue'
 import ChatDialog from './components/ChatDialog.vue'
 import ScreenshotFollowUp from './components/ScreenshotFollowUp.vue'
+import TutorialWizard from './components/TutorialWizard.vue'
 
 import { useUIStore } from './stores/ui'
 import { useSettingsStore } from './stores/settings'
 import { useSolutionStore } from './stores/solution'
 import { useVoiceStore } from './stores/voice'
 import { useChatStore } from './stores/chat'
+import { useTutorialStore } from './stores/tutorial'
 import { on } from './services/events'
 import { api } from './services/api'
 import { wsService } from './services/websocket'
@@ -78,6 +81,7 @@ const settingsStore = useSettingsStore()
 const solution = useSolutionStore()
 const voice = useVoiceStore()
 const chatStore = useChatStore()
+const tutorial = useTutorialStore()
 
 const followUpRef = ref(null)
 let pendingSolveCallback = null
@@ -138,6 +142,12 @@ onMounted(() => {
 
   settingsStore.loadSettings().then(() => {
     settingsStore.resetStatus()
+    // 首次启动显示教程
+    setTimeout(() => {
+      if (!tutorial.allCompleted) {
+        tutorial.show()
+      }
+    }, 800)
   })
 
   on('key-recorded', (data) => {
