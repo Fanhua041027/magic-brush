@@ -254,6 +254,8 @@
               </div>
             </section>
           </main>
+          <!-- 拖拽调整大小的手柄 -->
+          <div class="resize-handle" @mousedown.prevent="startResize"></div>
         </div>
       </div>
     </Transition>
@@ -313,11 +315,58 @@ const POS_KEY = 'magic-brush-interview-pos'
 const showBgSlider = ref(false)
 const showFontSlider = ref(false)
 const showHistoryPanel = ref(false)
+
+// ── 窗口尺寸 ──────────────────────────────────────────────
+const SIZE_KEY = 'magic-brush-interview-size'
+const dialogWidth = ref(860)
+const dialogHeight = ref(640)
+let isResizing = false
+let resizeStart = { x: 0, y: 0, w: 0, h: 0 }
+
+function loadSize() {
+  try {
+    const saved = localStorage.getItem(SIZE_KEY)
+    if (saved) {
+      const { w, h } = JSON.parse(saved)
+      if (w >= 520 && w <= 1600) dialogWidth.value = w
+      if (h >= 400 && h <= 1200) dialogHeight.value = h
+    }
+  } catch (e) { /* ignore */ }
+}
+function saveSize() {
+  try { localStorage.setItem(SIZE_KEY, JSON.stringify({ w: dialogWidth.value, h: dialogHeight.value })) } catch (e) { /* ignore */ }
+}
+
+function startResize(e) {
+  isResizing = true
+  resizeStart = { x: e.clientX, y: e.clientY, w: dialogWidth.value, h: dialogHeight.value }
+  document.addEventListener('mousemove', onResize)
+  document.addEventListener('mouseup', stopResize)
+  document.body.style.cursor = 'nwse-resize'
+  document.body.style.userSelect = 'none'
+}
+function onResize(e) {
+  if (!isResizing) return
+  const newW = Math.max(520, Math.min(1600, resizeStart.w + (e.clientX - resizeStart.x)))
+  const newH = Math.max(400, Math.min(1200, resizeStart.h + (e.clientY - resizeStart.y)))
+  dialogWidth.value = newW
+  dialogHeight.value = newH
+}
+function stopResize() {
+  isResizing = false
+  document.removeEventListener('mousemove', onResize)
+  document.removeEventListener('mouseup', stopResize)
+  document.body.style.cursor = ''
+  document.body.style.userSelect = ''
+  saveSize()
+}
 const transparencyLevel = ref(8)
 const fontOpacity = ref(100)
 const t = () => 1 - transparencyLevel.value / 100
 const containerStyle = computed(() => ({
   background: `rgba(20, 22, 30, ${t()})`,
+  width: `${dialogWidth.value}px`,
+  height: `${dialogHeight.value}px`,
 }))
 const overlayStyle = computed(() => {
   // 自由悬浮模式：不显示遮罩，点击穿透
@@ -536,6 +585,7 @@ onMounted(() => {
   startTimer()
   loadOpacity()
   loadPosition()
+  loadSize()
 
   // 流式输出
   window.addEventListener('chat-stream-chunk', onStreamChunk)
@@ -604,10 +654,6 @@ watch(() => chatStore.isVisible, (v) => {
 .interview-container {
   position: fixed;
   z-index: 1000;
-  width: 860px;
-  max-width: 94vw;
-  height: 640px;
-  max-height: 85vh;
   background: rgba(24, 26, 35, 0.92);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 16px;
@@ -1241,4 +1287,30 @@ watch(() => chatStore.isVisible, (v) => {
 .interview-fade-leave-to { opacity: 0; }
 .interview-fade-enter-from .interview-container,
 .interview-fade-leave-to .interview-container { transform: scale(0.95) translateY(10px); opacity: 0; }
+
+/* ─── 拖拽调整大小手柄 ─── */
+.resize-handle {
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  width: 16px;
+  height: 16px;
+  cursor: nwse-resize;
+  z-index: 5;
+}
+.resize-handle::after {
+  content: '';
+  position: absolute;
+  bottom: 3px;
+  right: 3px;
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid rgba(255, 255, 255, 0.15);
+  border-bottom: 2px solid rgba(255, 255, 255, 0.15);
+  border-radius: 0 0 3px 0;
+  transition: border-color 0.15s;
+}
+.resize-handle:hover::after {
+  border-color: rgba(255, 255, 255, 0.4);
+}
 </style>
