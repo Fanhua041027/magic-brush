@@ -12,9 +12,6 @@ import (
 	"ai-assistant/pkg/state"
 	"ai-assistant/pkg/task"
 	"context"
-	"os"
-	"os/exec"
-
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
@@ -120,24 +117,12 @@ func (a *App) IsStandaloneInterview() bool {
 
 // OpenStandaloneInterview 打开独立面试窗口（主窗口调用）
 func (a *App) OpenStandaloneInterview() {
-	selfPath, err := os.Executable()
-	if err != nil {
-		logger.Printf("[Standalone] 获取执行路径失败: %v", err)
-		a.EmitEvent("toast", "独立窗口启动失败")
-		return
-	}
-	logger.Printf("[Standalone] 尝试启动: %s --standalone-interview", selfPath)
-	cmd := exec.Command(selfPath, "--standalone-interview")
-	if err := cmd.Start(); err != nil {
-		logger.Printf("[Standalone] 启动失败: %v", err)
-		// 如果子进程被系统策略阻止，退而显示已有的 AI 辅助面试面板
-		logger.Println("[Standalone] 降级: 打开面板")
-		a.EmitEvent("open-chat")
-		a.EmitEvent("toast", "独立窗口被系统策略阻止，已在主窗口打开面试面板")
-	} else {
-		logger.Printf("[Standalone] 已启动 (PID %d)", cmd.Process.Pid)
-		a.EmitEvent("toast", "独立面试窗口已启动")
-	}
+	logger.Println("[Standalone] 打开 AI 辅助面试面板")
+	// 由于系统策略阻止创建新进程，改为直接打开已有的面试面板
+	// 同时最大化主窗口使其看起来像独立窗口
+	runtime.WindowMaximise(a.ctx)
+	a.EmitEvent("open-chat")
+	a.EmitEvent("toast", "AI 辅助面试已展开（最大化窗口可作独立窗口使用）")
 }
 
 func (a *App) onConfigChanged(newConfig config.Config, oldConfig config.Config) {
