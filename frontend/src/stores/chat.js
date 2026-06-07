@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, reactive, watch } from 'vue'
-import { ChatWithDeepSeek, ChatWithDeepSeekStream, ChatWithScreenshotSync } from '../../wailsjs/go/app/App'
+import { ChatWithDeepSeek, ChatWithDeepSeekStream, ChatWithScreenshot, ChatWithScreenshotSync } from '../../wailsjs/go/app/App'
 
 // 本地存储键名
 const STORAGE_KEY = 'magic-brush-chat-history'
@@ -154,13 +154,22 @@ export const useChatStore = defineStore('chat', () => {
 
     addMessage('user', text + ' [附截图]')
     isLoading.value = true
+    currentStreamContent.value = ''
 
     try {
-      const result = await ChatWithScreenshotSync(text, screenshotBase64, '')
-      if (result) {
-        addMessage('assistant', result)
-      } else {
-        addMessage('assistant', '模型未返回内容')
+      // 流式输出：Go 后端逐字推送，事件驱动更新 messages
+      await ChatWithScreenshot(text, screenshotBase64, '')
+
+      // 检查流式是否真的产生了助手消息
+      const hasAssistantMsg = messages.value.some(
+        m => m.role === 'assistant' && !m._streaming && m.content.length > 0
+      )
+      if (!hasAssistantMsg) {
+        // 流式无输出，降级为非流式
+        const result = await ChatWithScreenshotSync(text, screenshotBase64, '')
+        if (result) {
+          addMessage('assistant', result)
+        }
       }
     } catch (error) {
       console.error('Chat with screenshot error:', error)
