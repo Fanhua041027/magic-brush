@@ -260,6 +260,12 @@
       <line x1="12" y1="4" x2="12" y2="20" />
     </template>
 
+    <!-- Plus -->
+    <template v-else-if="name === 'plus'">
+      <line x1="12" y1="5" x2="12" y2="19" />
+      <line x1="5" y1="12" x2="19" y2="12" />
+    </template>
+
     <!-- Eye (visible) -->
     <template v-else-if="name === 'eye'">
       <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />

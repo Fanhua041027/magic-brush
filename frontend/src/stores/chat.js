@@ -44,8 +44,84 @@ export const useChatStore = defineStore('chat', () => {
     localStorage.removeItem(STORAGE_KEY)
   }
 
-  // 初始化时加载历史
+  // ── 多对话管理 ──────────────────────────────────────────────
+  const CONV_LIST_KEY = 'magic-brush-conversation-list'
+  const ACTIVE_CONV_KEY = 'magic-brush-active-conversation'
+  const savedConversations = ref([])
+  const activeConversationId = ref(null)
+
+  function loadConversationList() {
+    try {
+      const stored = localStorage.getItem(CONV_LIST_KEY)
+      if (stored) savedConversations.value = JSON.parse(stored)
+    } catch (e) { /* ignore */ }
+    try {
+      const active = localStorage.getItem(ACTIVE_CONV_KEY)
+      if (active) activeConversationId.value = active
+    } catch (e) { /* ignore */ }
+  }
+
+  function saveConversationList() {
+    try { localStorage.setItem(CONV_LIST_KEY, JSON.stringify(savedConversations.value)) } catch (e) { /* ignore */ }
+  }
+
+  function saveCurrentConversation() {
+    if (messages.value.length === 0) return
+    const convId = Date.now().toString()
+    const firstUserMsg = messages.value.find(m => m.role === 'user')
+    const title = firstUserMsg ? firstUserMsg.content.slice(0, 30) + (firstUserMsg.content.length > 30 ? '...' : '') : '新对话'
+    const conv = {
+      id: convId,
+      title,
+      messages: JSON.parse(JSON.stringify(messages.value)),
+      createdAt: new Date().toISOString(),
+      messageCount: messages.value.length,
+    }
+    // 替换或新增
+    const existingIdx = savedConversations.value.findIndex(c => c.id === activeConversationId.value)
+    if (existingIdx >= 0) {
+      savedConversations.value[existingIdx] = conv
+    } else {
+      savedConversations.value.unshift(conv)
+    }
+    // 限制保存数量
+    if (savedConversations.value.length > 20) savedConversations.value = savedConversations.value.slice(0, 20)
+    activeConversationId.value = convId
+    saveConversationList()
+    localStorage.setItem(ACTIVE_CONV_KEY, convId)
+  }
+
+  function startNewConversation() {
+    if (messages.value.length > 0) saveCurrentConversation()
+    messages.value = []
+    activeConversationId.value = Date.now().toString()
+    localStorage.setItem(ACTIVE_CONV_KEY, activeConversationId.value)
+    localStorage.removeItem(STORAGE_KEY)
+  }
+
+  function loadConversation(id) {
+    const conv = savedConversations.value.find(c => c.id === id)
+    if (conv) {
+      if (messages.value.length > 0) saveCurrentConversation()
+      messages.value = JSON.parse(JSON.stringify(conv.messages))
+      activeConversationId.value = id
+      localStorage.setItem(ACTIVE_CONV_KEY, id)
+      saveHistory()
+    }
+  }
+
+  function deleteConversation(id) {
+    savedConversations.value = savedConversations.value.filter(c => c.id !== id)
+    saveConversationList()
+    if (activeConversationId.value === id) {
+      activeConversationId.value = null
+      localStorage.removeItem(ACTIVE_CONV_KEY)
+    }
+  }
+
+  // 初始化时加载
   loadHistory()
+  loadConversationList()
 
   // 监听消息变化，自动保存
   watch(messages, () => {
@@ -239,5 +315,11 @@ export const useChatStore = defineStore('chat', () => {
     handleStreamError,
     exportHistory,
     importHistory,
+    savedConversations,
+    activeConversationId,
+    saveCurrentConversation,
+    startNewConversation,
+    loadConversation,
+    deleteConversation,
   }
 })

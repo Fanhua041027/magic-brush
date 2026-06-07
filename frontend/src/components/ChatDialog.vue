@@ -46,10 +46,45 @@
                   </div>
                 </Transition>
               </div>
-              <button class="tb-btn" @click="chatStore.clearHistory" title="清除对话">
-                <Icon name="trash" :size="14" />
+              <button class="tb-btn" @click="chatStore.startNewConversation" title="创建新对话">
+                <Icon name="plus" :size="14" />
               </button>
-              <button class="tb-btn" @click="chatStore.exportHistory" title="导出历史">
+              <div class="history-control">
+                <button class="tb-btn" @click="showHistoryPanel = !showHistoryPanel" title="历史对话">
+                  <Icon name="clock" :size="14" />
+                </button>
+                <Transition name="slide-fade">
+                  <div v-if="showHistoryPanel" class="history-panel">
+                    <div class="hp-header">
+                      <span>历史对话</span>
+                      <button class="hp-close" @click="showHistoryPanel = false">
+                        <Icon name="x" :size="12" />
+                      </button>
+                    </div>
+                    <div class="hp-body">
+                      <div v-if="chatStore.savedConversations.length === 0" class="hp-empty">
+                        暂无历史对话
+                      </div>
+                      <div
+                        v-for="conv in chatStore.savedConversations"
+                        :key="conv.id"
+                        class="hp-item"
+                        :class="{ active: conv.id === chatStore.activeConversationId }"
+                        @click="selectHistory(conv.id)"
+                      >
+                        <div class="hp-item-title">{{ conv.title }}</div>
+                        <div class="hp-item-meta">
+                          {{ conv.messageCount }} 条消息 · {{ formatTime(conv.createdAt) }}
+                        </div>
+                        <button class="hp-item-del" @click.stop="chatStore.deleteConversation(conv.id)" title="删除">
+                          <Icon name="trash" :size="10" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </Transition>
+              </div>
+              <button class="tb-btn" @click="chatStore.exportHistory" title="导出当前对话">
                 <Icon name="download" :size="14" />
               </button>
               <button class="tb-btn tb-close" @click="close">
@@ -177,9 +212,20 @@
 
               <!-- Control Bar -->
               <div class="control-bar">
-                <div class="voice-indicator" :class="{ recording: voiceStore.isRecording }">
-                  <Icon :name="voiceStore.isRecording ? 'mic' : 'mic-off'" :size="13" />
-                  <span>{{ voiceStore.isRecording ? '录音中...松开 Alt' : '左 Alt 语音' }}</span>
+                <div class="control-left">
+                  <button
+                    v-if="chatStore.isLoading"
+                    class="stop-btn"
+                    @click="stopThinking"
+                    title="停止生成"
+                  >
+                    <Icon name="square" :size="12" />
+                    <span>停止思考</span>
+                  </button>
+                  <div v-else class="voice-indicator" :class="{ recording: voiceStore.isRecording }">
+                    <Icon :name="voiceStore.isRecording ? 'mic' : 'mic-off'" :size="13" />
+                    <span>{{ voiceStore.isRecording ? '录音中...松开 Alt' : '左 Alt 语音' }}</span>
+                  </div>
                 </div>
                 <button
                   class="send-btn"
@@ -223,6 +269,7 @@ import { useSettingsStore } from '../stores/settings'
 import { useUIStore } from '../stores/ui'
 import { renderMarkdownWithLatex } from '../utils/markdown-latex'
 import { api } from '../services/api'
+import { CancelRunningTask } from '../../wailsjs/go/app/App'
 
 const chatStore = useChatStore()
 const voiceStore = useVoiceStore()
@@ -265,6 +312,7 @@ const FONT_OPACITY_KEY = 'magic-brush-interview-font-opacity'
 const POS_KEY = 'magic-brush-interview-pos'
 const showBgSlider = ref(false)
 const showFontSlider = ref(false)
+const showHistoryPanel = ref(false)
 const transparencyLevel = ref(8)
 const fontOpacity = ref(100)
 const t = () => 1 - transparencyLevel.value / 100
@@ -454,9 +502,33 @@ async function sendMessage() {
   }
 }
 
+async function stopThinking() {
+  try {
+    await CancelRunningTask()
+    chatStore.isLoading = false
+  } catch (e) {
+    console.error('Stop thinking error:', e)
+  }
+}
+
 function close() {
   stopTimer()
+  showHistoryPanel.value = false
   chatStore.hide()
+}
+
+function selectHistory(id) {
+  chatStore.loadConversation(id)
+  showHistoryPanel.value = false
+}
+
+function formatTime(iso) {
+  if (!iso) return ''
+  const d = new Date(iso)
+  const now = new Date()
+  const isToday = d.toDateString() === now.toDateString()
+  if (isToday) return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+  return d.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
 }
 
 // ── 事件监听 ────────────────────────────────────────────────
@@ -667,6 +739,69 @@ watch(() => chatStore.isVisible, (v) => {
 .slide-fade-leave-active { transition: all 0.15s ease; }
 .slide-fade-enter-from,
 .slide-fade-leave-to { opacity: 0; transform: translateY(-4px); }
+
+/* ─── 历史对话面板 ─── */
+.history-control { position: relative; display: flex; align-items: center; }
+.history-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  width: 240px;
+  max-height: 320px;
+  background: rgba(24, 26, 35, 0.96);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.5);
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.hp-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(255,255,255,0.5);
+}
+.hp-close {
+  width: 20px; height: 20px; border: none; border-radius: 4px;
+  background: transparent; color: rgba(255,255,255,0.3);
+  cursor: pointer; display: flex; align-items: center; justify-content: center;
+}
+.hp-close:hover { background: rgba(255,255,255,0.06); color: rgba(255,255,255,0.5); }
+.hp-body {
+  flex: 1; overflow-y: auto; padding: 4px;
+  scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.06) transparent;
+}
+.hp-body::-webkit-scrollbar { width: 3px; }
+.hp-body::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.06); border-radius: 2px; }
+.hp-empty {
+  padding: 20px; text-align: center; font-size: 12px; color: rgba(255,255,255,0.2);
+}
+.hp-item {
+  position: relative; padding: 8px 10px; border-radius: 6px;
+  cursor: pointer; transition: background 0.15s; margin-bottom: 2px;
+}
+.hp-item:hover { background: rgba(255,255,255,0.04); }
+.hp-item.active { background: rgba(99,102,241,0.08); }
+.hp-item-title {
+  font-size: 12px; font-weight: 600; color: rgba(255,255,255,0.7);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  padding-right: 16px;
+}
+.hp-item-meta {
+  font-size: 10px; color: rgba(255,255,255,0.2); margin-top: 2px;
+}
+.hp-item-del {
+  position: absolute; top: 8px; right: 8px;
+  width: 18px; height: 18px; border: none; border-radius: 3px;
+  background: transparent; color: rgba(255,255,255,0.15);
+  cursor: pointer; display: none; align-items: center; justify-content: center; padding: 0;
+}
+.hp-item:hover .hp-item-del { display: flex; }
+.hp-item-del:hover { background: rgba(239,68,68,0.15); color: #ef4444; }
 
 /* ═══ Main: 三栏 ═══ */
 .interview-main {
@@ -1016,6 +1151,24 @@ watch(() => chatStore.isVisible, (v) => {
   padding: 6px 10px;
   border-top: 1px solid rgba(255, 255, 255, 0.04);
 }
+.control-left { display: flex; align-items: center; gap: 6px; }
+
+.stop-btn {
+  display: flex; align-items: center; gap: 5px;
+  padding: 5px 10px;
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.2);
+  border-radius: 6px;
+  color: #ef4444;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+  font-family: inherit;
+  animation: stop-btn-pulse 1.5s infinite;
+}
+.stop-btn:hover { background: rgba(239, 68, 68, 0.2); }
+@keyframes stop-btn-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.7; } }
 .voice-indicator {
   display: flex; align-items: center; gap: 5px;
   font-size: 11px;
