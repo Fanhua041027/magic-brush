@@ -121,6 +121,7 @@ func getDefaultShortcuts() map[string]shortcut.KeyBinding {
 		"move_right":   {ComboID: "39+164", KeyName: "Alt+→"},
 		"scroll_up":    {ComboID: "33+164", KeyName: "Alt+PgUp"},
 		"scroll_down":  {ComboID: "34+164", KeyName: "Alt+PgDn"},
+		"standalone":   {ComboID: "112", KeyName: "F1"},
 	}
 }
 

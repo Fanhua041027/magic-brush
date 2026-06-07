@@ -100,6 +100,9 @@ func (s *Service) handleTrigger(action string) {
 		s.delegate.ScrollContent("up")
 	case "scroll_down":
 		s.delegate.ScrollContent("down")
+	case "standalone":
+		logger.Println("触发独立面试窗口")
+		s.delegate.OpenStandalone()
 	}
 }
 

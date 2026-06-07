@@ -26,3 +26,8 @@ func (a *App) CopyCode() {
 func (a *App) OpenChat() {
 	a.EmitEvent("open-chat")
 }
+
+// OpenStandalone 打开独立面试窗口
+func (a *App) OpenStandalone() {
+	a.OpenStandaloneInterview()
+}

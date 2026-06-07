@@ -14,4 +14,5 @@ type ServiceDelegate interface {
 	StartSTTRecording()
 	StopSTTRecording()
 	OpenChat()
+	OpenStandalone()
 }
