@@ -427,19 +427,30 @@ def main():
     parser.add_argument("--device", default="auto", help="Device: auto/cuda/cpu")
     parser.add_argument("--language", default="zh", help="Language: zh/en/auto")
     parser.add_argument("--sensitivity", type=float, default=0.5, help="Sensitivity: 0.0-1.0")
-    parser.add_argument("--stt", default="qwen_local", choices=["qwen_cloud", "qwen_local", "local_whisper"],
-                        help="STT service priority: qwen_local > qwen_cloud > local_whisper")
+    parser.add_argument("--stt", default="qwen_cloud", choices=["qwen_cloud", "qwen_local", "local_whisper"],
+                        help="STT service: qwen_cloud(仅云端) / qwen_local(本地+云端备份) / local_whisper")
     args = parser.parse_args()
 
     print(f"[Sidecar] 🚀 初始化 STT 服务链...")
     print(f"[Sidecar]    模型: {args.model}, 设备: {args.device}, 语言: {args.language}")
 
-    # 使用 STTManager 初始化所有服务（自动备份降级）
+    # 根据 --stt 参数构建优先级列表
+    priority_map = {
+        "qwen_cloud": ["qwen_cloud"],                         # 仅云端
+        "qwen_local": ["qwen_local", "qwen_cloud", "local_whisper"],  # 本地→云端→Whisper
+        "local_whisper": ["local_whisper"],                    # 仅 Whisper
+    }
+    priority = priority_map.get(args.stt, ["qwen_cloud"])
+
+    print(f"[Sidecar]    优先级: {' → '.join(priority)}")
+
+    # 使用 STTManager 初始化服务（按优先级依次加载）
     stt_manager = STTManager(
         api_key=QWEN_API_KEY,
         whisper_model=args.model,
         whisper_device=args.device,
         whisper_language=args.language,
+        priority=priority,
     )
     loaded = stt_manager.initialize_all()
 

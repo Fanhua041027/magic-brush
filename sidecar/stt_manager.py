@@ -29,11 +29,18 @@ class STTManager:
     DEFAULT_PRIORITY = ["qwen_local", "qwen_cloud", "local_whisper"]
 
     def __init__(self, api_key: str = "", whisper_model: str = "medium",
-                 whisper_device: str = "auto", whisper_language: str = "zh"):
+                 whisper_device: str = "auto", whisper_language: str = "zh",
+                 priority: Optional[List[str]] = None):
+        """
+        Args:
+            priority: 服务优先级列表，如 ["qwen_cloud"] 只加载云端
+                      默认 None 使用 DEFAULT_PRIORITY 全部加载
+        """
         self.api_key = api_key
         self.whisper_model_name = whisper_model
         self.whisper_device = whisper_device
         self.whisper_language = whisper_language
+        self._priority_config = priority or list(self.DEFAULT_PRIORITY)
 
         # 服务实例
         self._qwen_local = None
@@ -42,7 +49,7 @@ class STTManager:
 
         # 服务状态
         self._service_ready: dict = {}
-        self._current_priority = list(self.DEFAULT_PRIORITY)
+        self._current_priority = list(self._priority_config)
         self._lock = threading.Lock()
 
         # 统计
@@ -51,34 +58,31 @@ class STTManager:
     # ── 初始化 ─────────────────────────────────────────────
 
     def initialize_all(self) -> List[str]:
-        """初始化所有可用服务，返回成功加载的服务列表"""
+        """按配置的优先级初始化服务，返回成功加载的服务列表"""
         loaded = []
 
-        # 1. 千问本地 ASR
-        if self._init_qwen_local():
-            loaded.append("qwen_local")
-            self._service_ready["qwen_local"] = True
-            print(f"[STTManager] ✅ {self.SERVICE_NAMES['qwen_local']} 就绪")
+        for svc in self._priority_config:
+            ok = False
+            if svc == "qwen_local":
+                ok = self._init_qwen_local()
+            elif svc == "qwen_cloud":
+                ok = self._init_qwen_cloud()
+            elif svc == "local_whisper":
+                ok = self._init_whisper()
 
-        # 2. 千问云端 STT
-        if self._init_qwen_cloud():
-            loaded.append("qwen_cloud")
-            self._service_ready["qwen_cloud"] = True
-            print(f"[STTManager] ✅ {self.SERVICE_NAMES['qwen_cloud']} 就绪")
+            if ok:
+                loaded.append(svc)
+                self._service_ready[svc] = True
+                print(f"[STTManager] ✅ {self.SERVICE_NAMES[svc]} 就绪")
+            else:
+                print(f"[STTManager] ⏭️ {self.SERVICE_NAMES.get(svc, svc)} 不可用，跳过")
 
-        # 3. 本地 Whisper
-        if self._init_whisper():
-            loaded.append("local_whisper")
-            self._service_ready["local_whisper"] = True
-            print(f"[STTManager] ✅ {self.SERVICE_NAMES['local_whisper']} 就绪")
-
-        # 动态调整优先级：只保留可用的服务
-        self._current_priority = [s for s in self.DEFAULT_PRIORITY if s in loaded]
+        self._current_priority = loaded
 
         if not loaded:
             print("[STTManager] ❌ 没有可用的 STT 服务")
         else:
-            chain = " → ".join(self.SERVICE_NAMES[s] for s in self._current_priority)
+            chain = " → ".join(self.SERVICE_NAMES[s] for s in loaded)
             print(f"[STTManager] 🔗 服务链: {chain}")
 
         return loaded
