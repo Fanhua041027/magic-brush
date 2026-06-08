@@ -501,8 +501,8 @@ func enableTransparentGradient(hwnd uintptr) {
 // applyGhostMode 应用幽灵模式
 func applyGhostMode(hwnd uintptr) {
 	style := GetWindowLong(hwnd, int(GWL_STYLE))
-	// 移除 标题栏 | 调大小边框 | 最小化 | 最大化 | 系统菜单
-	newStyle := style &^ (WS_CAPTION | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU)
+	// 移除 标题栏 | 最小化 | 最大化 | 系统菜单，但保留调大小边框 (WS_THICKFRAME) 以支持窗口拖拽调整大小
+	newStyle := style &^ (WS_CAPTION | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU)
 	SetWindowLong(hwnd, int(GWL_STYLE), int32(newStyle))
 
 	exStyle := GetWindowLong(hwnd, int(GWL_EXSTYLE))
