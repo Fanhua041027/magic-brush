@@ -39,7 +39,10 @@ func (m *Manager) Start(model, device, language string, sensitivity float64, stt
 		"--stt", sttService,
 	}
 	m.cmd = exec.Command("python", args...)
-	m.cmd.Env = append(os.Environ(), "HF_ENDPOINT=https://hf-mirror.com")
+	m.cmd.Env = append(os.Environ(),
+		"HF_ENDPOINT=https://hf-mirror.com",
+		"PYTHONIOENCODING=utf-8",  // 修复 Windows GBK 下 emoji 无法打印的问题
+	)
 
 	if err := m.cmd.Start(); err != nil {
 		m.cmd = nil

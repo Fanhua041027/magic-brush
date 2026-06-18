@@ -52,6 +52,8 @@ export function InjectTextToActiveInput(arg1:string):Promise<void>;
 
 export function IsInterruptThinkingEnabled():Promise<boolean>;
 
+export function IsStandaloneInterview():Promise<boolean>;
+
 export function LoadKB(arg1:string):Promise<Record<string, any>>;
 
 export function MoveWindow(arg1:number,arg2:number):Promise<void>;
@@ -61,6 +63,10 @@ export function OpenChat():Promise<void>;
 export function OpenMicrophoneSettings():Promise<void>;
 
 export function OpenScreenCaptureSettings():Promise<void>;
+
+export function OpenStandalone():Promise<void>;
+
+export function OpenStandaloneInterview():Promise<void>;
 
 export function ParseResume():Promise<string>;
 
@@ -131,7 +137,3 @@ export function TriggerSend():Promise<void>;
 export function TriggerSolve():Promise<void>;
 
 export function UpdateSettings(arg1:string):Promise<string>;
-
-export function IsStandaloneInterview():Promise<boolean>;
-
-export function OpenStandaloneInterview():Promise<void>;

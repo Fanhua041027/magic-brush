@@ -572,16 +572,18 @@
 </template>
 
 <script setup>
-import { ref, watch, computed, onMounted, reactive } from 'vue'
+import { ref, watch, computed, onMounted, reactive, nextTick } from 'vue'
 import Icon from './Icon.vue'
 import { useTutorialStore } from '../stores/tutorial'
 import { useUIStore } from '../stores/ui'
 import { useSettingsStore } from '../stores/settings'
+import { useVoiceStore } from '../stores/voice'
 import { api } from '../services/api'
 
 const tutorial = useTutorialStore()
 const ui = useUIStore()
 const settingsStore = useSettingsStore()
+const voiceStore = useVoiceStore()
 
 // ── Phase steps ─────────────────────────────────────────────
 const phase1Steps = computed(() => tutorial.STEPS.filter(s => s.phase === 0))
@@ -630,8 +632,14 @@ onMounted(() => {
   if (settingsStore.settings.prompt) {
     customPrompt.value = settingsStore.settings.prompt
   }
+  // 从已有设置中恢复音频设备选择
+  if (settingsStore.settings.sttDevice) {
+    audioInputType.value = settingsStore.settings.sttDevice
+  }
   // 加载知识库状态
   refreshKBStatus()
+  // 加载音频设备列表
+  voiceStore.loadDevices()
 })
 
 // ── 方法 ───────────────────────────────────────────────────
@@ -715,6 +723,26 @@ function updatePromptContext() {
   // 当自定义岗位输入时更新
 }
 
+async function applyAudioDevice(type) {
+  // 根据音频输入类型切换设备
+  try {
+    // 先加载最新设备列表
+    await voiceStore.loadDevices()
+    const devices = voiceStore.devices
+    // 找到对应类型的设备
+    const target = devices.find(d => d.type === type)
+    if (target) {
+      voiceStore.selectedDeviceId = target.id
+      await voiceStore.changeDevice()
+      console.log(`[Audio] Switched to device: ${target.name} (${type})`)
+    } else {
+      console.warn(`[Audio] No device found for type: ${type}`)
+    }
+  } catch (e) {
+    console.error('[Audio] Failed to switch device:', e)
+  }
+}
+
 async function saveStepSettings() {
   // 构造包含角色和风格信息的 prompt 前缀
   const roleName = selectedRole === 'custom' ? customRole.value : roleOptions.find(r => r.value === selectedRole)?.label || ''
@@ -756,7 +784,11 @@ function handleNext() {
       // 同步 tempSettings 到 settings 并持久化
       settingsStore.settings.sttLanguage = settingsStore.tempSettings.sttLanguage
       settingsStore.settings.sttService = settingsStore.tempSettings.sttService
-      settingsStore.saveSettingsSilent().then(() => {
+      settingsStore.settings.sttDevice = audioInputType.value
+      // 应用音频设备切换
+      applyAudioDevice(audioInputType.value).then(() => {
+        return settingsStore.saveSettingsSilent()
+      }).then(() => {
         langSaved.value = true
         proceedNext(step)
       })

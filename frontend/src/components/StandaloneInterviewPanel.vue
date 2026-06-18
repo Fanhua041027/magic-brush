@@ -100,7 +100,7 @@ import Icon from './Icon.vue'
 import { useChatStore } from '../stores/chat'
 import { renderMarkdownWithLatex } from '../utils/markdown-latex'
 import { CancelRunningTask } from '../../wailsjs/go/app/App'
-import { Quit } from '../../wailsjs/runtime/runtime'
+import { Quit, EventsOn, EventsOff } from '../../wailsjs/runtime/runtime'
 
 const chatStore = useChatStore()
 const inputText = ref('')
@@ -140,15 +140,15 @@ async function stopThinking() {
 }
 
 onMounted(() => {
-  window.addEventListener('chat-stream-chunk', e => chatStore.handleStreamChunk(e.detail))
-  window.addEventListener('chat-stream-done', () => chatStore.handleStreamDone())
-  window.addEventListener('chat-stream-error', e => chatStore.handleStreamError(e.detail))
+  EventsOn('chat-stream-chunk', chunk => chatStore.handleStreamChunk(chunk))
+  EventsOn('chat-stream-done', () => chatStore.handleStreamDone())
+  EventsOn('chat-stream-error', error => chatStore.handleStreamError(error))
 })
 
 onUnmounted(() => {
-  window.removeEventListener('chat-stream-chunk', () => {})
-  window.removeEventListener('chat-stream-done', () => {})
-  window.removeEventListener('chat-stream-error', () => {})
+  EventsOff('chat-stream-chunk')
+  EventsOff('chat-stream-done')
+  EventsOff('chat-stream-error')
 })
 
 watch(() => chatStore.messages.length, () => {

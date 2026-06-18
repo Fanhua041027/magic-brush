@@ -98,6 +98,10 @@ export function IsInterruptThinkingEnabled() {
   return window['go']['app']['App']['IsInterruptThinkingEnabled']();
 }
 
+export function IsStandaloneInterview() {
+  return window['go']['app']['App']['IsStandaloneInterview']();
+}
+
 export function LoadKB(arg1) {
   return window['go']['app']['App']['LoadKB'](arg1);
 }
@@ -116,6 +120,14 @@ export function OpenMicrophoneSettings() {
 
 export function OpenScreenCaptureSettings() {
   return window['go']['app']['App']['OpenScreenCaptureSettings']();
+}
+
+export function OpenStandalone() {
+  return window['go']['app']['App']['OpenStandalone']();
+}
+
+export function OpenStandaloneInterview() {
+  return window['go']['app']['App']['OpenStandaloneInterview']();
 }
 
 export function ParseResume() {
@@ -256,12 +268,4 @@ export function TriggerSolve() {
 
 export function UpdateSettings(arg1) {
   return window['go']['app']['App']['UpdateSettings'](arg1);
-}
-
-export function IsStandaloneInterview() {
-  return window['go']['app']['App']['IsStandaloneInterview']();
-}
-
-export function OpenStandaloneInterview() {
-  return window['go']['app']['App']['OpenStandaloneInterview']();
 }

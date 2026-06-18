@@ -273,6 +273,7 @@ import { useUIStore } from '../stores/ui'
 import { renderMarkdownWithLatex } from '../utils/markdown-latex'
 import { api } from '../services/api'
 import { CancelRunningTask, OpenStandaloneInterview } from '../../wailsjs/go/app/App'
+import { EventsOn, EventsOff } from '../../wailsjs/runtime/runtime'
 
 const chatStore = useChatStore()
 const voiceStore = useVoiceStore()
@@ -563,28 +564,28 @@ onMounted(() => {
   // 延迟一帧等待 DOM 渲染完成后初始化尺寸
   nextTick(() => { loadSize(); setupResizeObserver() })
 
-  // 流式输出
-  window.addEventListener('chat-stream-chunk', onStreamChunk)
-  window.addEventListener('chat-stream-done', onStreamDone)
-  window.addEventListener('chat-stream-error', onStreamError)
+  // 流式输出（使用 Wails runtime EventsOn 接收后端事件）
+  EventsOn('chat-stream-chunk', (chunk) => { onStreamChunk({ detail: chunk }) })
+  EventsOn('chat-stream-done', () => { onStreamDone() })
+  EventsOn('chat-stream-error', (error) => { onStreamError({ detail: error }) })
 
-  // 语音转写
-  window.addEventListener('stt-streaming-text', (e) => {
-    if (e.detail) {
-      streamingText.value += e.detail
+  // 语音转写（同样使用 Wails runtime EventsOn）
+  EventsOn('stt-streaming-text', (text) => {
+    if (text) {
+      streamingText.value += text
       inputText.value = streamingText.value
     }
   })
-  window.addEventListener('stt-recording-started', () => {
+  EventsOn('stt-recording-started', () => {
     streamingText.value = ''
     addTranscript('interviewer', '...')
   })
-  window.addEventListener('stt-recording-stopped', () => { streamingText.value = '' })
-  window.addEventListener('stt-transcribed', (e) => {
-    if (e.detail) {
-      inputText.value = e.detail
+  EventsOn('stt-recording-stopped', () => { streamingText.value = '' })
+  EventsOn('stt-transcribed', (text) => {
+    if (text) {
+      inputText.value = text
       // 将最终转写加入转录区
-      addTranscript('me', e.detail)
+      addTranscript('me', text)
       streamingText.value = ''
     }
   })
@@ -593,9 +594,13 @@ onMounted(() => {
 onUnmounted(() => {
   stopTimer()
   if (resizeObserver) resizeObserver.disconnect()
-  window.removeEventListener('chat-stream-chunk', onStreamChunk)
-  window.removeEventListener('chat-stream-done', onStreamDone)
-  window.removeEventListener('chat-stream-error', onStreamError)
+  EventsOff('chat-stream-chunk')
+  EventsOff('chat-stream-done')
+  EventsOff('chat-stream-error')
+  EventsOff('stt-streaming-text')
+  EventsOff('stt-recording-started')
+  EventsOff('stt-recording-stopped')
+  EventsOff('stt-transcribed')
 })
 
 function onStreamChunk(e) { chatStore.handleStreamChunk(e.detail) }

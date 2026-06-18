@@ -101,6 +101,7 @@ import { ref, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import Icon from './Icon.vue'
 import { renderMarkdownWithLatex } from '../utils/markdown-latex'
 import { ChatWithDeepSeek, ChatWithDeepSeekStream, ChatWithScreenshotSync, TriggerFollowUpScreenshot, StopThinking, SetFollowUpActive } from '../../wailsjs/go/app/App'
+import { EventsOn, EventsOff } from '../../wailsjs/runtime/runtime'
 
 const isVisible = ref(false)
 const isLoading = ref(false)
@@ -334,37 +335,37 @@ function handleKeydown(e) {
 }
 
 onMounted(() => {
-  // 监听流式输出事件
-  window.addEventListener('chat-stream-chunk', (e) => {
+  // 监听流式输出事件（使用 Wails runtime EventsOn）
+  EventsOn('chat-stream-chunk', (chunk) => {
     if (!isVisible.value) return
-    handleStreamChunk(e.detail)
+    handleStreamChunk(chunk)
   })
-  window.addEventListener('chat-stream-done', () => {
+  EventsOn('chat-stream-done', () => {
     if (!isVisible.value) return
     handleStreamDone()
   })
-  window.addEventListener('chat-stream-error', (e) => {
+  EventsOn('chat-stream-error', (error) => {
     if (!isVisible.value) return
-    handleStreamError(e.detail)
+    handleStreamError(error)
   })
 
-  window.addEventListener('stt-recording-started', () => {
+  EventsOn('stt-recording-started', () => {
     isRecording.value = true
   })
-  window.addEventListener('stt-recording-stopped', () => {
+  EventsOn('stt-recording-stopped', () => {
     isRecording.value = false
   })
-  window.addEventListener('stt-transcribed', (e) => {
-    if (isVisible.value && e.detail) {
-      inputText.value = e.detail
+  EventsOn('stt-transcribed', (text) => {
+    if (isVisible.value && text) {
+      inputText.value = text
       nextTick(() => {
         sendMessage()
       })
     }
   })
-  window.addEventListener('followup-screenshot-taken', (e) => {
-    if (isVisible.value && e.detail) {
-      screenshot.value = e.detail
+  EventsOn('followup-screenshot-taken', (screenshotData) => {
+    if (isVisible.value && screenshotData) {
+      screenshot.value = screenshotData
       messages.value.push({
         role: 'user',
         content: '[已更新截图]',
@@ -376,6 +377,13 @@ onMounted(() => {
 
 onUnmounted(() => {
   document.removeEventListener('keydown', handleKeydown)
+  EventsOff('chat-stream-chunk')
+  EventsOff('chat-stream-done')
+  EventsOff('chat-stream-error')
+  EventsOff('stt-recording-started')
+  EventsOff('stt-recording-stopped')
+  EventsOff('stt-transcribed')
+  EventsOff('followup-screenshot-taken')
 })
 
 defineExpose({ show, close })

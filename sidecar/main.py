@@ -150,7 +150,7 @@ def stt_start():
 
 @app.route("/api/stt/start-streaming", methods=["POST"])
 def stt_start_streaming():
-    """开始流式转写"""
+    """开始流式转写（使用 STTManager）"""
     global is_recording
     if recorder is None:
         error = AppError(
@@ -160,18 +160,10 @@ def stt_start_streaming():
         )
         return jsonify(error.to_dict()), 500
 
-    # 检查 STT 服务是否可用
-    if use_qwen_stt and qwen_stt is None:
+    if stt_manager is None or not stt_manager.is_any_ready():
         error = AppError(
             code=ErrorCode.TRANSCRIPTION_FAILED,
-            message="Qwen STT not initialized",
-            recoverable=False,
-        )
-        return jsonify(error.to_dict()), 500
-    elif not use_qwen_stt and transcriber is None:
-        error = AppError(
-            code=ErrorCode.TRANSCRIPTION_FAILED,
-            message="Local STT not initialized",
+            message="No STT service available",
             recoverable=False,
         )
         return jsonify(error.to_dict()), 500
@@ -186,21 +178,10 @@ def stt_start_streaming():
             return jsonify(error.to_dict()), 409
 
         def streaming_callback(audio_chunk):
-            """流式转写回调 — 将音频送入 Qwen STT 缓冲区"""
+            """将音频块送入 STTManager 的流式引擎"""
             try:
                 if audio_chunk.size > 0:
-                    if stt_service_type == "qwen_cloud" and qwen_stt:
-                        qwen_stt.add_audio_chunk(audio_chunk)
-                    elif stt_service_type == "qwen_local" and qwen_asr_local:
-                        text = qwen_asr_local.recognize(audio_chunk)
-                        if text.strip():
-                            broadcast_ws_message({"type": "stt-streaming", "text": text})
-                            streaming_results.append(text)
-                    elif transcriber:
-                        text = transcriber.transcribe(audio_chunk)
-                        if text.strip():
-                            broadcast_ws_message({"type": "stt-streaming", "text": text})
-                            streaming_results.append(text)
+                    stt_manager.add_audio_chunk(audio_chunk)
             except Exception as e:
                 error = error_handler.handle_error(e, "streaming_callback")
                 broadcast_ws_message({
@@ -213,14 +194,13 @@ def stt_start_streaming():
         try:
             recorder.start_recording()
             is_recording = True
-            # 启动 Qwen STT 流式识别
-            if stt_service_type == "qwen_cloud" and qwen_stt:
-                def on_streaming_result(text):
-                    if text.strip():
-                        broadcast_ws_message({"type": "stt-streaming", "text": text})
-                        streaming_results.append(text)
-                qwen_stt.start_streaming(on_streaming_result, sample_rate=recorder.sample_rate)
-                print("[STT] Qwen streaming started", flush=True)
+            # 启动 STT 流式识别（STTManager 自动选择可用服务）
+            def on_streaming_result(text):
+                if text.strip():
+                    broadcast_ws_message({"type": "stt-streaming", "text": text})
+                    streaming_results.append(text)
+            stt_manager.start_streaming(on_streaming_result, sample_rate=recorder.sample_rate)
+            print("[STT] Streaming started via STTManager", flush=True)
         except Exception as e:
             error = error_handler.handle_error(e, "stt_start_streaming")
             return jsonify(error.to_dict()), 500
@@ -431,18 +411,18 @@ def main():
                         help="STT service: qwen_cloud(仅云端) / qwen_local(本地+云端备份) / local_whisper")
     args = parser.parse_args()
 
-    print(f"[Sidecar] 🚀 初始化 STT 服务链...")
+    print(f"[Sidecar] Initializing STT service chain...")
     print(f"[Sidecar]    模型: {args.model}, 设备: {args.device}, 语言: {args.language}")
 
     # 根据 --stt 参数构建优先级列表
     priority_map = {
         "qwen_cloud": ["qwen_cloud"],                         # 仅云端
-        "qwen_local": ["qwen_local", "qwen_cloud", "local_whisper"],  # 本地→云端→Whisper
+        "qwen_local": ["qwen_local", "qwen_cloud", "local_whisper"],  # 本地->云端->Whisper
         "local_whisper": ["local_whisper"],                    # 仅 Whisper
     }
     priority = priority_map.get(args.stt, ["qwen_cloud"])
 
-    print(f"[Sidecar]    优先级: {' → '.join(priority)}")
+    print(f"[Sidecar]    优先级: {' -> '.join(priority)}")
 
     # 使用 STTManager 初始化服务（按优先级依次加载）
     stt_manager = STTManager(
@@ -455,22 +435,22 @@ def main():
     loaded = stt_manager.initialize_all()
 
     if loaded:
-        chain = " → ".join(STTManager.SERVICE_NAMES[s] for s in stt_manager.get_available_services())
-        print(f"[Sidecar] ✅ STT 服务链: {chain}")
+        chain = " -> ".join(STTManager.SERVICE_NAMES[s] for s in stt_manager.get_available_services())
+        print(f"[Sidecar] [OK] STT chain: {chain}")
     else:
-        print(f"[Sidecar] ❌ 没有可用的 STT 服务")
+        print(f"[Sidecar] [FAIL] No STT service available")
 
     # 初始化录音器
     try:
         recorder = AudioRecorder()
-        print("[Sidecar] ✅ Audio recorder ready")
+        print("[Sidecar] [OK] Audio recorder ready")
     except Exception as e:
         error = error_handler.handle_error(e, "recorder_init")
-        print(f"[Sidecar] ❌ Audio recorder init failed: {error.message}")
+        print(f"[Sidecar] [FAIL] Audio recorder init failed: {error.message}")
         recorder = None
 
-    print(f"[Sidecar] 📡 Starting HTTP server on port {args.port}")
-    print(f"[Sidecar] 🔌 WebSocket available at ws://127.0.0.1:{args.port}/ws")
+    print(f"[Sidecar] Starting HTTP server on port {args.port}")
+    print(f"[Sidecar] WebSocket at ws://127.0.0.1:{args.port}/ws")
     app.run(host="127.0.0.1", port=args.port, debug=False, threaded=True)
 
 
