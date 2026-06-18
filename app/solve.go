@@ -5,12 +5,16 @@ import (
 	"ai-assistant/pkg/solution"
 	"context"
 	"strings"
+	"sync"
 )
 
 const MaxScreenshots = 3
 
-var screenshotBuffer []string
-var pendingUserMessage string
+var (
+	screenshotBuffer  []string
+	pendingUserMessage string
+	screenshotMu      sync.Mutex // 保护 screenshotBuffer 和 pendingUserMessage 的并发访问
+)
 
 // SetFollowUpActive 设置追问对话框状态（前端调用）
 func (a *App) SetFollowUpActive(active bool) {
@@ -42,10 +46,13 @@ func (a *App) TriggerScreenshot() {
 		return
 	}
 
+	screenshotMu.Lock()
 	if len(screenshotBuffer) >= MaxScreenshots {
+		screenshotMu.Unlock()
 		a.EmitEvent("toast", "最多截图 3 张图片，请先发送或删除")
 		return
 	}
+	screenshotMu.Unlock()
 
 	previewResult, err := a.GetScreenshotPreview(
 		cfg.CompressionQuality,
@@ -60,11 +67,16 @@ func (a *App) TriggerScreenshot() {
 		return
 	}
 
+	screenshotMu.Lock()
 	screenshotBuffer = append(screenshotBuffer, previewResult.Base64)
-	a.EmitEvent("screenshot-taken", previewResult.Base64, len(screenshotBuffer))
+	count := len(screenshotBuffer)
+	screenshotMu.Unlock()
+	a.EmitEvent("screenshot-taken", previewResult.Base64, count)
 }
 
 func (a *App) RemoveScreenshot(index int) {
+	screenshotMu.Lock()
+	defer screenshotMu.Unlock()
 	if index < 0 || index >= len(screenshotBuffer) {
 		return
 	}
@@ -73,6 +85,8 @@ func (a *App) RemoveScreenshot(index int) {
 }
 
 func (a *App) RemoveLastScreenshot() {
+	screenshotMu.Lock()
+	defer screenshotMu.Unlock()
 	if len(screenshotBuffer) == 0 {
 		return
 	}
@@ -82,7 +96,9 @@ func (a *App) RemoveLastScreenshot() {
 }
 
 func (a *App) ClearScreenshots() {
+	screenshotMu.Lock()
 	screenshotBuffer = nil
+	screenshotMu.Unlock()
 	a.EmitEvent("screenshots-cleared")
 }
 
@@ -130,7 +146,9 @@ func (a *App) TriggerSend() {
 		return
 	}
 
+	screenshotMu.Lock()
 	if len(screenshotBuffer) == 0 {
+		screenshotMu.Unlock()
 		previewResult, err := a.GetScreenshotPreview(
 			cfg.CompressionQuality,
 			cfg.Sharpening,
@@ -143,10 +161,12 @@ func (a *App) TriggerSend() {
 			a.EmitEvent("toast", "截图失败: "+err.Error())
 			return
 		}
+		screenshotMu.Lock()
 		screenshotBuffer = append(screenshotBuffer, previewResult.Base64)
 	}
 
 	if a.taskManager.HasRunningTask() {
+		screenshotMu.Unlock()
 		logger.Println("忽略重复触发：当前有任务正在运行")
 		a.EmitEvent("toast", "正在处理中，请稍候...")
 		return
@@ -155,6 +175,7 @@ func (a *App) TriggerSend() {
 	screenshots := make([]string, len(screenshotBuffer))
 	copy(screenshots, screenshotBuffer)
 	screenshotBuffer = nil
+	screenshotMu.Unlock()
 
 	a.EmitEvent("start-solving")
 	a.EmitEvent("user-message", screenshots[0])
@@ -182,12 +203,16 @@ func (a *App) solveInternal(ctx context.Context, screenshots []string) bool {
 		return false
 	}
 
+	screenshotMu.Lock()
+	userMsg := pendingUserMessage
+	pendingUserMessage = ""
+	screenshotMu.Unlock()
+
 	req := solution.Request{
 		Config:      cfg,
 		Screenshots: screenshots,
-		UserMessage: pendingUserMessage,
+		UserMessage: userMsg,
 	}
-	pendingUserMessage = ""
 
 	// Auto-inject KB context if sidecar is running and KB is configured
 	if cfg.KBPath != "" && a.sidecar != nil && a.sidecar.IsRunning() {
@@ -220,7 +245,9 @@ func (a *App) solveInternal(ctx context.Context, screenshots []string) bool {
 }
 
 func (a *App) SetPendingUserMessage(text string) {
+	screenshotMu.Lock()
 	pendingUserMessage = text
+	screenshotMu.Unlock()
 }
 
 func (a *App) CancelRunningTask() bool {
