@@ -121,7 +121,7 @@ function renderMarkdown(text) {
 }
 
 function show(screenshotData, answer, context) {
-  console.log('[FollowUp] show() called', { hasScreenshot: !!screenshotData, hasAnswer: !!answer })
+  // DEVLOG: console.log('[FollowUp] show() called', { hasScreenshot: !!screenshotData, hasAnswer: !!answer })
   screenshot.value = screenshotData || ''
   previousAnswer.value = answer || ''
   previousContext.value = context || ''
@@ -144,7 +144,7 @@ async function takeScreenshot() {
     const result = await TriggerFollowUpScreenshot()
     if (result) {
       screenshot.value = result
-      console.log('[FollowUp] Screenshot taken, auto-sending...')
+      // DEVLOG: console.log('[FollowUp] Screenshot taken, auto-sending...')
       // 截图后自动发送给模型
       await sendScreenshotToModel(result)
     }
@@ -163,12 +163,12 @@ async function sendScreenshotToModel(screenshotBase64) {
   })
 
   isLoading.value = true
-  console.log('[FollowUp] Sending screenshot to model with image support...')
+  // DEVLOG: console.log('[FollowUp] Sending screenshot to model with image support...')
 
   try {
     // 使用 ChatWithScreenshotSync 发送图片给模型（非流式，支持图片）
     const result = await ChatWithScreenshotSync(userMsg, screenshotBase64, previousContext.value)
-    console.log('[FollowUp] Got result:', result ? result.slice(0, 100) : 'null')
+    // DEVLOG: console.log('[FollowUp] Got result:', result ? result.slice(0, 100) : 'null')
     if (result) {
       messages.value.push({
         role: 'assistant',
@@ -219,7 +219,7 @@ async function sendMessage() {
 
   isLoading.value = true
   currentStreamContent.value = ''
-  console.log('[FollowUp] Sending message:', text)
+  // DEVLOG: console.log('[FollowUp] Sending message:', text)
 
   try {
     // 构造包含上下文的消息
@@ -227,7 +227,7 @@ async function sendMessage() {
     if (previousContext.value) {
       fullMessage = `[之前的回答]\n${previousContext.value.slice(0, 800)}\n\n[追问] ${text}`
     }
-    console.log('[FollowUp] Calling ChatWithDeepSeekStream...')
+    // DEVLOG: console.log('[FollowUp] Calling ChatWithDeepSeekStream...')
 
     // 使用流式输出
     await ChatWithDeepSeekStream(fullMessage)
@@ -235,7 +235,7 @@ async function sendMessage() {
     // 流式输出完成后，内容已经通过事件处理
     // 如果没有收到流式事件，使用普通模式作为备选
     if (currentStreamContent.value === '') {
-      console.log('[FollowUp] No stream events received, falling back to sync mode')
+      // DEVLOG: console.log('[FollowUp] No stream events received, falling back to sync mode')
       const result = await ChatWithDeepSeek(fullMessage)
       if (result) {
         messages.value.push({
@@ -264,7 +264,7 @@ async function sendMessage() {
       content: `抱歉，发生了错误: ${error.message || '未知错误'}`,
     })
   } finally {
-    console.log('[FollowUp] Done, setting isLoading to false')
+    // DEVLOG: console.log('[FollowUp] Done, setting isLoading to false')
     isLoading.value = false
     currentStreamContent.value = ''
   }
@@ -321,13 +321,13 @@ function handleStreamError(error) {
 }
 
 function handleKeydown(e) {
-  console.log('[FollowUp] Keydown:', e.key, 'isVisible:', isVisible.value)
+  // DEVLOG: console.log('[FollowUp] Keydown:', e.key, 'isVisible:', isVisible.value)
   if (e.key === 'Escape' && isVisible.value) {
     close()
   }
   // F6 或 F8 追问截图
   if ((e.key === 'F6' || e.key === 'F8') && isVisible.value) {
-    console.log('[FollowUp] Taking screenshot...')
+    // DEVLOG: console.log('[FollowUp] Taking screenshot...')
     e.preventDefault()
     e.stopPropagation()
     takeScreenshot()

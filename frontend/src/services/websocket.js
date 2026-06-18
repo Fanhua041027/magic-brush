@@ -28,7 +28,7 @@ class WebSocketService {
       this.ws = new WebSocket(this.url)
 
       this.ws.onopen = () => {
-        console.log('[WebSocket] Connected')
+        // DEVLOG: console.log('[WebSocket] Connected')
         this.isConnected = true
         this.reconnectAttempts = 0
 
@@ -52,7 +52,7 @@ class WebSocketService {
       }
 
       this.ws.onclose = (event) => {
-        console.log('[WebSocket] Disconnected:', event.code, event.reason)
+        // DEVLOG: console.log('[WebSocket] Disconnected:', event.code, event.reason)
         this.isConnected = false
         this.emit('disconnected', { code: event.code, reason: event.reason })
 

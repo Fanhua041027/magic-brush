@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { ref, reactive, watch } from 'vue'
+import { ref, watch } from 'vue'
 import { ChatWithDeepSeek, ChatWithDeepSeekStream, ChatWithScreenshot, ChatWithScreenshotSync, ChatWithDeepSeekStreamWithContext } from '../../wailsjs/go/app/App'
 import { useSettingsStore } from './settings'
 
@@ -78,6 +78,7 @@ export const useChatStore = defineStore('chat', () => {
   const isLoading = ref(false)
   const messages = ref([])
   const currentStreamContent = ref('')
+  let streamReceivedData = false // 标记流式是否产生过数据（防竞态）
 
   // 从本地存储加载历史
   function loadHistory() {
@@ -226,6 +227,7 @@ export const useChatStore = defineStore('chat', () => {
     addMessage('user', text)
     isLoading.value = true
     currentStreamContent.value = ''
+    streamReceivedData = false // 重置流式数据标记
 
     try {
       // 构建带个人化 System Prompt 的消息列表
@@ -247,11 +249,16 @@ export const useChatStore = defineStore('chat', () => {
       // 流式输出：传入完整消息列表，后端按序处理
       await ChatWithDeepSeekStreamWithContext(msgs)
 
+      // 等一小段时间让流式事件到达（防止竞态条件下误判无输出）
+      if (!streamReceivedData) {
+        await new Promise(resolve => setTimeout(resolve, 800))
+      }
+
       // 检查流式是否真的产生了助手消息
       const hasAssistantMsg = messages.value.some(
         m => m.role === 'assistant' && !m._streaming && m.content.length > 0
       )
-      if (!hasAssistantMsg) {
+      if (!hasAssistantMsg && !streamReceivedData) {
         // 流式无输出，降级为非流式
         const result = await ChatWithDeepSeek(text)
         if (result) {
@@ -270,6 +277,7 @@ export const useChatStore = defineStore('chat', () => {
   function handleStreamChunk(chunk) {
     if (!isLoading.value) return
 
+    streamReceivedData = true // 标记已有流式数据
     currentStreamContent.value += chunk
 
     // 更新或添加助手消息
@@ -316,16 +324,22 @@ export const useChatStore = defineStore('chat', () => {
     addMessage('user', text + ' [附截图]')
     isLoading.value = true
     currentStreamContent.value = ''
+    streamReceivedData = false
 
     try {
       // 流式输出：Go 后端逐字推送，事件驱动更新 messages
       await ChatWithScreenshot(text, screenshotBase64, '')
 
+      // 等一小段时间让流式事件到达（防竞态）
+      if (!streamReceivedData) {
+        await new Promise(resolve => setTimeout(resolve, 800))
+      }
+
       // 检查流式是否真的产生了助手消息
       const hasAssistantMsg = messages.value.some(
         m => m.role === 'assistant' && !m._streaming && m.content.length > 0
       )
-      if (!hasAssistantMsg) {
+      if (!hasAssistantMsg && !streamReceivedData) {
         // 流式无输出，降级为非流式
         const result = await ChatWithScreenshotSync(text, screenshotBase64, '')
         if (result) {

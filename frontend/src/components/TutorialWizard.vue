@@ -197,7 +197,7 @@
                           <div class="file-info-row">
                             <Icon name="file" :size="16" />
                             <span class="file-name">{{ settingsStore.settings.resumePath.split(/[/\\]/).pop() }}</span>
-                            <span class="file-badge">{{ settingsStore.settings.resumeContent ? '已解析' : '待解析' }}</span>
+                            <span class="file-badge" :class="{ resolved: settingsStore.settings.resumeContent }">{{ settingsStore.settings.resumeContent ? '已解析' : '待解析' }}</span>
                           </div>
                           <div class="file-actions-row">
                             <button class="btn-small" @click="selectResume">
@@ -1137,9 +1137,8 @@ function finishTutorial() {
 }
 .file-info-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
 .file-name { font-size: 13px; color: rgba(255,255,255,0.7); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.file-badge { font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: 6px; }
-.file-badge:contains(已解析) { background: rgba(16,185,129,0.1); color: #34d399; }
-.file-badge { background: rgba(255,255,255,0.06); color: rgba(255,255,255,0.4); }
+.file-badge { font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: 6px; background: rgba(255,255,255,0.06); color: rgba(255,255,255,0.4); }
+.file-badge.resolved { background: rgba(16,185,129,0.1); color: #34d399; }
 .file-actions-row { display: flex; gap: 6px; }
 
 .api-warning {

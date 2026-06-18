@@ -80,14 +80,23 @@ const interviewBehaviorRules = `
 - 需要步骤时使用编号列表
 </格式规则>`
 
-// 支持视觉的模型配置
-const (
-	deepseekVisionModel = "deepseek-v4-flash" // DeepSeek V4 Flash 支持视觉
-)
+// getAPIKey 从配置获取 API Key，未配置时返回空字符串（让 API 调用自然失败）
+func (a *App) getAPIKey() string {
+	if a.configManager != nil {
+		cfg := a.configManager.Get()
+		if cfg.APIKey != "" {
+			return cfg.APIKey
+		}
+	}
+	return ""
+}
 
 // ChatWithDeepSeek 使用 DeepSeek API 进行对话（非流式）
 func (a *App) ChatWithDeepSeek(message string) string {
-	apiKey := "sk-eeab470faa664cb8a3c954554354e711"
+	apiKey := a.getAPIKey()
+	if apiKey == "" {
+		return "请先在设置中配置 API Key"
+	}
 
 	client := openai.NewClient(
 		option.WithAPIKey(apiKey),
@@ -145,7 +154,7 @@ func (a *App) ChatWithDeepSeek(message string) string {
 
 // ChatWithDeepSeekStream 使用 DeepSeek API 进行对话（流式输出）
 func (a *App) ChatWithDeepSeekStream(message string) {
-	apiKey := "sk-eeab470faa664cb8a3c954554354e711"
+	apiKey := a.getAPIKey()
 
 	client := openai.NewClient(
 		option.WithAPIKey(apiKey),
@@ -212,7 +221,7 @@ func (a *App) ChatWithDeepSeekStream(message string) {
 
 // ChatWithDeepSeekStreamWithContext 使用 DeepSeek API 进行带上下文的对话（流式输出）
 func (a *App) ChatWithDeepSeekStreamWithContext(messages []map[string]string) {
-	apiKey := "sk-eeab470faa664cb8a3c954554354e711"
+	apiKey := a.getAPIKey()
 
 	client := openai.NewClient(
 		option.WithAPIKey(apiKey),
@@ -264,7 +273,7 @@ func (a *App) ChatWithDeepSeekStreamWithContext(messages []map[string]string) {
 
 // ChatWithScreenshot 使用 DeepSeek API 进行截图追问对话（流式输出）
 func (a *App) ChatWithScreenshot(message string, screenshotBase64 string, previousContext string) {
-	apiKey := "sk-eeab470faa664cb8a3c954554354e711"
+	apiKey := a.getAPIKey()
 
 	client := openai.NewClient(
 		option.WithAPIKey(apiKey),
@@ -347,7 +356,7 @@ func (a *App) ChatWithScreenshotSync(message string, screenshotBase64 string, pr
 	cfg := a.configManager.Get()
 	apiKey := cfg.APIKey
 	if apiKey == "" {
-		apiKey = "sk-eeab470faa664cb8a3c954554354e711"
+		apiKey = a.getAPIKey()
 	}
 
 	baseURL := cfg.BaseURL
