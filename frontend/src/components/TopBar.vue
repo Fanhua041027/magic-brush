@@ -39,6 +39,13 @@
 
         <ThemeToggle />
 
+        <div class="bar-divider" />
+
+        <!-- 聆听助手按钮 -->
+        <button class="bar-btn" @click="openListenAssistant" title="聆听助手 - 监听系统声音并生成回答">
+          <Icon name="speaker" :size="15" />
+        </button>
+
         <button class="bar-btn" @click="$emit('openSettings')" title="设置"
           @mouseenter="showSettingsTooltip" @mouseleave="showSettingsTip = false" ref="settingsBtnRef">
           <Icon name="settings" :size="15" />
@@ -119,6 +126,10 @@ const statusClass = computed(() => {
 const showStatusPanel = ref(false)
 const statusBtnRef = ref(null)
 const panelStyle = reactive({ top: '0px', left: '0px' })
+
+function openListenAssistant() {
+  window.dispatchEvent(new CustomEvent('open-mock-overlay'))
+}
 
 function toggleStatusPanel() {
   if (showStatusPanel.value) {

@@ -269,3 +269,20 @@ export function TriggerSolve() {
 export function UpdateSettings(arg1) {
   return window['go']['app']['App']['UpdateSettings'](arg1);
 }
+
+// Audio & Interview API
+export function AudioListDevices() {
+  return window['go']['app']['App']['AudioListDevices']();
+}
+export function AudioCapture(arg1, arg2) {
+  return window['go']['app']['App']['AudioCapture'](arg1, arg2);
+}
+export function AudioTranscribe(arg1) {
+  return window['go']['app']['App']['AudioTranscribe'](arg1);
+}
+export function AudioIsAvailable() {
+  return window['go']['app']['App']['AudioIsAvailable']();
+}
+export function GenerateInterviewAnswer(arg1) {
+  return window['go']['app']['App']['GenerateInterviewAnswer'](arg1);
+}

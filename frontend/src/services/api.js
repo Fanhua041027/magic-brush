@@ -46,6 +46,12 @@ import {
   ChatWithScreenshot,
   IsStandaloneInterview,
   OpenStandaloneInterview,
+  // Audio & Interview API
+  AudioListDevices,
+  AudioCapture,
+  AudioTranscribe,
+  AudioIsAvailable,
+  GenerateInterviewAnswer,
 } from '../../wailsjs/go/app/App'
 
 import { Quit } from '../../wailsjs/runtime/runtime'
@@ -110,4 +116,11 @@ export const api = {
   chatWithScreenshot: (message, screenshot, context) => ChatWithScreenshot(message, screenshot, context),
   isStandaloneInterview: () => IsStandaloneInterview(),
   openStandaloneInterview: () => OpenStandaloneInterview(),
+
+  // Audio & Interview API
+  audioListDevices: () => AudioListDevices(),
+  audioCapture: (deviceID, durationSec) => AudioCapture(deviceID, durationSec),
+  audioTranscribe: (base64Data) => AudioTranscribe(base64Data),
+  audioIsAvailable: () => AudioIsAvailable(),
+  generateInterviewAnswer: (query) => GenerateInterviewAnswer(query),
 }

@@ -28,15 +28,20 @@ sock = Sock(app)
 # Global state
 recorder: AudioRecorder | None = None
 kb: KnowledgeBase | None = None
-stt_manager: STTManager | None = None  # STT 管理器（带自动备份）
+stt_manager: STTManager | None = None
 recording_lock = threading.Lock()
 is_recording = False
 
 # WebSocket clients
 ws_clients = set()
+ws_clients_lock = threading.Lock()
 
-# 千问 API Key（硬编码）
-QWEN_API_KEY = "sk-3ced1755eb8a44628ce5ff1e5789f4b7"
+# 流式转写结果（线程安全）
+_streaming_results: list[str] = []
+_streaming_results_lock = threading.Lock()
+
+# 千问 API Key — 优先从环境变量读取，其次硬编码（生产应使用环境变量）
+QWEN_API_KEY = os.environ.get("DASHSCOPE_API_KEY", "sk-3ced1755eb8a44628ce5ff1e5789f4b7")
 
 
 # ── Health ──────────────────────────────────────────────────────────────
@@ -198,7 +203,8 @@ def stt_start_streaming():
             def on_streaming_result(text):
                 if text.strip():
                     broadcast_ws_message({"type": "stt-streaming", "text": text})
-                    streaming_results.append(text)
+                    with _streaming_results_lock:
+                        _streaming_results.append(text)
             stt_manager.start_streaming(on_streaming_result, sample_rate=recorder.sample_rate)
             print("[STT] Streaming started via STTManager", flush=True)
         except Exception as e:
@@ -209,16 +215,16 @@ def stt_start_streaming():
 
 @sock.route("/ws")
 def websocket_handler(ws):
-    """WebSocket 处理器"""
-    ws_clients.add(ws)
-    print(f"[WebSocket] Client connected. Total: {len(ws_clients)}")
+    """WebSocket 处理器（线程安全）"""
+    with ws_clients_lock:
+        ws_clients.add(ws)
+    count = len(ws_clients)
+    print(f"[WebSocket] Client connected. Total: {count}")
     try:
         while True:
-            # 保持连接活跃
             data = ws.receive(timeout=30)
             if data is None:
                 break
-            # 处理客户端消息
             try:
                 msg = json.loads(data)
                 handle_ws_message(msg)
@@ -227,20 +233,25 @@ def websocket_handler(ws):
     except Exception as e:
         print(f"[WebSocket] Error: {e}")
     finally:
-        ws_clients.discard(ws)
+        with ws_clients_lock:
+            ws_clients.discard(ws)
         print(f"[WebSocket] Client disconnected. Total: {len(ws_clients)}")
 
 
 def broadcast_ws_message(message):
-    """广播消息到所有 WebSocket 客户端"""
+    """线程安全地广播消息到所有 WebSocket 客户端"""
     dead_clients = set()
-    for ws in ws_clients:
+    with ws_clients_lock:
+        clients = list(ws_clients)
+    for ws in clients:
         try:
             ws.send(json.dumps(message))
         except Exception:
             dead_clients.add(ws)
     # 清理断开的连接
-    ws_clients.difference_update(dead_clients)
+    if dead_clients:
+        with ws_clients_lock:
+            ws_clients.difference_update(dead_clients)
 
 
 def handle_ws_message(message):
@@ -253,16 +264,18 @@ def handle_ws_message(message):
         pass
 
 
-# 全局变量存储流式转写结果
-streaming_results = []
+# 全局变量存储流式转写结果（线程安全）
+_streaming_results = []
+_streaming_results_lock = threading.Lock()
 
 
 @app.route("/api/stt/streaming-results", methods=["GET"])
 def stt_streaming_results():
-    """获取流式转写结果"""
-    global streaming_results
-    results = list(streaming_results)
-    streaming_results.clear()
+    """获取流式转写结果（线程安全）"""
+    global _streaming_results
+    with _streaming_results_lock:
+        results = list(_streaming_results)
+        _streaming_results.clear()
     return jsonify({"results": results})
 
 
@@ -298,7 +311,8 @@ def stt_stop():
             streaming_text, streaming_service = stt_manager.stop_streaming()
             if streaming_text.strip():
                 broadcast_ws_message({"type": "stt-streaming", "text": streaming_text})
-                streaming_results.append(streaming_text)
+                with _streaming_results_lock:
+                    _streaming_results.append(streaming_text)
 
             audio = recorder.stop_recording()
             is_recording = False
@@ -309,10 +323,11 @@ def stt_stop():
 
     # 获取最终转写结果  — 使用 STTManager 自动备份识别
     text = ""
-    if streaming_results:
-        text = "".join(streaming_results)
-        streaming_results.clear()
-    elif audio.size > 0:
+    with _streaming_results_lock:
+        if _streaming_results:
+            text = "".join(_streaming_results)
+            _streaming_results.clear()
+    if not text and audio.size > 0:
         text, used_service = stt_manager.recognize(audio, sample_rate=recorder.sample_rate)
         if text:
             print(f"[STT] ✅ 识别成功 (服务: {STTManager.SERVICE_NAMES.get(used_service, used_service)})", flush=True)

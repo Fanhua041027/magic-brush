@@ -41,7 +41,7 @@ func (m *Manager) Start(model, device, language string, sensitivity float64, stt
 	m.cmd = exec.Command("python", args...)
 	m.cmd.Env = append(os.Environ(),
 		"HF_ENDPOINT=https://hf-mirror.com",
-		"PYTHONIOENCODING=utf-8",  // 修复 Windows GBK 下 emoji 无法打印的问题
+		"PYTHONIOENCODING=utf-8",
 	)
 
 	if err := m.cmd.Start(); err != nil {
@@ -67,7 +67,9 @@ func (m *Manager) Start(model, device, language string, sensitivity float64, stt
 func (m *Manager) Stop() {
 	if m.cmd != nil && m.cmd.Process != nil {
 		logger.Printf("[Sidecar] Stopping (PID %d)", m.cmd.Process.Pid)
-		m.cmd.Process.Kill()
+		if err := m.cmd.Process.Kill(); err != nil {
+			logger.Printf("[Sidecar] Kill error: %v", err)
+		}
 		m.cmd.Wait()
 		m.cmd = nil
 	}
@@ -92,18 +94,20 @@ func (m *Manager) IsRunning() bool {
 }
 
 func findSidecarScript() string {
-	// Try common locations relative to the executable
-	paths := []string{
+	// 使用安全的文件存在性检查，避免命令注入
+	// 尝试多个路径
+	candidates := []string{
 		"sidecar/main.py",
 		"../sidecar/main.py",
 		"./sidecar/main.py",
 	}
-	for _, path := range paths {
-		cmd := exec.Command("python", "-c", "import os; print(os.path.isfile('"+path+"'))")
-		if out, err := cmd.Output(); err == nil && string(out) == "True\n" {
+
+	for _, path := range candidates {
+		if _, err := os.Stat(path); err == nil {
 			return path
 		}
 	}
-	// Fallback: assume CWD is project root
+
+	// Fallback
 	return "sidecar/main.py"
 }

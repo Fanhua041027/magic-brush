@@ -17,6 +17,9 @@
     <ChatDialog />
     <ScreenshotFollowUp ref="followUpRef" />
     <TutorialWizard />
+
+    <!-- 聆听助手悬浮窗 -->
+    <MockOverlay v-if="showListenAssistant" @close="showListenAssistant = false" />
   </template>
 
   <Teleport to="body">
@@ -73,6 +76,7 @@ import ChatDialog from './components/ChatDialog.vue'
 import ScreenshotFollowUp from './components/ScreenshotFollowUp.vue'
 import TutorialWizard from './components/TutorialWizard.vue'
 import StandaloneInterviewPanel from './components/StandaloneInterviewPanel.vue'
+import MockOverlay from './components/MockOverlay.vue'
 
 import { useUIStore } from './stores/ui'
 import { useSettingsStore } from './stores/settings'
@@ -93,6 +97,7 @@ const chatStore = useChatStore()
 const tutorial = useTutorialStore()
 
 const isStandalone = ref(false)
+const showListenAssistant = ref(false)
 
 const followUpRef = ref(null)
 let pendingSolveCallback = null
@@ -395,6 +400,11 @@ onMounted(async () => {
 
   on('open-chat', () => {
     chatStore.show()
+  })
+
+  // 聆听助手
+  window.addEventListener('open-mock-overlay', () => {
+    showListenAssistant.value = true
   })
 
   document.addEventListener('keydown', event => {
