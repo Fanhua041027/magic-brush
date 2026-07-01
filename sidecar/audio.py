@@ -159,6 +159,16 @@ def _auto_select_device() -> Optional[int]:
 # 模块加载时自动初始化
 init_audio(_auto_select_device())
 
+# ── 音频电平回调（用于 VU 表） ──────────────────────────────
+
+_audio_level_callback: Optional[Callable[[float], None]] = None
+
+def set_audio_level_callback(callback: Optional[Callable[[float], None]]):
+    """设置音频电平回调"""
+    global _audio_level_callback
+    _audio_level_callback = callback
+
+
 # ── 音频处理工具 ─────────────────────────────────────────
 
 def _resample(audio: np.ndarray, orig_rate: int, target_rate: int = TARGET_RATE) -> np.ndarray:
@@ -258,6 +268,12 @@ class AudioRecorder:
                     print("[Audio] Buffer overflow", flush=True)
 
                 audio = data[:, 0].copy()
+                rms = float(np.sqrt(np.mean(audio ** 2)))
+
+                # 更新 VU 表电平（无论是否录音都更新）
+                global _audio_level_callback
+                if _audio_level_callback:
+                    _audio_level_callback(rms)
 
                 with self._lock:
                     if self._recording:

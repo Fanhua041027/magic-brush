@@ -13,7 +13,7 @@ from flask import Flask, jsonify, request
 from flask_cors import CORS
 from flask_sock import Sock
 
-from audio import AudioRecorder
+from audio import AudioRecorder, set_audio_level_callback
 from transcribe import Transcriber
 from knowledge_base import KnowledgeBase
 from qwen_stt import QwenSTT
@@ -40,7 +40,11 @@ ws_clients_lock = threading.Lock()
 _streaming_results: list[str] = []
 _streaming_results_lock = threading.Lock()
 
-# 千问 API Key — 优先从环境变量读取，其次硬编码（生产应使用环境变量）
+# 音频电平监控
+_audio_level: float = 0.0
+_audio_level_lock = threading.Lock()
+
+# 千问 API Key — 优先从环境变量读取，其次硬编码
 QWEN_API_KEY = os.environ.get("DASHSCOPE_API_KEY", "sk-3ced1755eb8a44628ce5ff1e5789f4b7")
 
 
@@ -77,6 +81,15 @@ def clear_errors():
     """清除错误日志"""
     error_handler.clear_errors()
     return jsonify({"status": "ok"})
+
+
+# ── 音频电平监控 ─────────────────────────────────────────────
+
+@app.route("/api/audio/level", methods=["GET"])
+def audio_level():
+    """获取当前音频输入电平（VU 表用）"""
+    with _audio_level_lock:
+        return jsonify({"level": _audio_level})
 
 
 # ── STT (Speech-to-Text) ───────────────────────────────────────────────
@@ -264,9 +277,7 @@ def handle_ws_message(message):
         pass
 
 
-# 全局变量存储流式转写结果（线程安全）
-_streaming_results = []
-_streaming_results_lock = threading.Lock()
+# 全局变量存储流式转写结果（已在顶部声明）
 
 
 @app.route("/api/stt/streaming-results", methods=["GET"])
@@ -338,19 +349,23 @@ def stt_stop():
 
 @app.route("/api/stt/record", methods=["POST"])
 def stt_record():
-    """Record until silence, then transcribe. Returns transcribed text."""
-    if recorder is None or transcriber is None:
-        return jsonify({"error": "STT not initialized"}), 500
+    """Record until silence, then transcribe using STTManager."""
+    if recorder is None:
+        return jsonify({"error": "Audio recorder not initialized"}), 500
+    if stt_manager is None or not stt_manager.is_any_ready():
+        return jsonify({"error": "No STT service available"}), 500
+
     data = request.get_json(silent=True) or {}
     max_seconds = data.get("max_seconds", 30)
     try:
         audio = recorder.record_until_silence(max_seconds=max_seconds)
         if audio.size == 0:
             return jsonify({"text": ""})
-        text = transcriber.transcribe(audio)
-        return jsonify({"text": text})
+        text, used_service = stt_manager.recognize(audio, sample_rate=recorder.sample_rate)
+        return jsonify({"text": text, "service": used_service})
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        error = error_handler.handle_error(e, "stt_record")
+        return jsonify(error.to_dict()), 500
 
 
 # ── KB (Knowledge Base) ─────────────────────────────────────────────
@@ -458,6 +473,12 @@ def main():
     # 初始化录音器
     try:
         recorder = AudioRecorder()
+        # 注册 VU 表电平回调
+        def on_audio_level(rms: float):
+            global _audio_level
+            with _audio_level_lock:
+                _audio_level = rms
+        set_audio_level_callback(on_audio_level)
         print("[Sidecar] [OK] Audio recorder ready")
     except Exception as e:
         error = error_handler.handle_error(e, "recorder_init")

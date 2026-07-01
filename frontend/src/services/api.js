@@ -123,4 +123,15 @@ export const api = {
   audioTranscribe: (base64Data) => AudioTranscribe(base64Data),
   audioIsAvailable: () => AudioIsAvailable(),
   generateInterviewAnswer: (query) => GenerateInterviewAnswer(query),
+
+  // Sidecar 直接 HTTP API
+  async audioLevel() {
+    try {
+      const resp = await fetch('http://127.0.0.1:18765/api/audio/level')
+      if (!resp.ok) return { level: 0 }
+      return await resp.json()
+    } catch {
+      return { level: 0 }
+    }
+  },
 }

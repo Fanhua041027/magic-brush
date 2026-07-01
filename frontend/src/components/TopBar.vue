@@ -83,8 +83,20 @@
             <span class="sp-value model">{{ settingsStore.settings.model || '未设置' }}</span>
           </div>
           <div class="sp-row">
+            <span class="sp-label">知识库</span>
+            <span class="sp-value" :class="settingsStore.settings.kbPath ? 'ok' : 'warn'">{{ settingsStore.settings.kbPath ? '已加载' : '未配置' }}</span>
+          </div>
+          <div class="sp-row">
             <span class="sp-label">隐身模式</span>
             <span class="sp-value" :class="ui.isStealthMode ? 'ok' : 'err'">{{ ui.isStealthMode ? '已开启' : '已关闭' }}</span>
+          </div>
+          <div class="sp-row">
+            <span class="sp-label">STT 服务</span>
+            <span class="sp-value">{{ settingsStore.settings.sttService || 'qwen' }}</span>
+          </div>
+          <div v-if="audioLevel > 0.01" class="sp-row">
+            <span class="sp-label">音频电平</span>
+            <span class="sp-value" :class="vuStatusClass">{{ (audioLevel * 100).toFixed(1) }}%</span>
           </div>
         </div>
       </div>
@@ -106,6 +118,7 @@ import { useTutorialStore } from '../stores/tutorial'
 import Icon from './Icon.vue'
 import ThemeToggle from './ThemeToggle.vue'
 import STTButton from './STTButton.vue'
+import { api } from '../services/api'
 
 defineEmits(['openSettings'])
 
@@ -113,6 +126,32 @@ const ui = useUIStore()
 const settingsStore = useSettingsStore()
 const chatStore = useChatStore()
 const tutorial = useTutorialStore()
+
+// ── 音频电平（状态面板用） ──
+const audioLevel = ref(0)
+let levelPollTimer = null
+let smoothLevel = 0
+
+const vuStatusClass = computed(() => {
+  const l = audioLevel.value
+  if (l < 0.02) return ''
+  if (l < 0.05) return 'ok'
+  if (l < 0.15) return 'warn'
+  return 'err'
+})
+
+async function pollLevel() {
+  try {
+    const resp = await api.audioLevel()
+    if (resp && typeof resp.level === 'number') {
+      smoothLevel = smoothLevel * 0.3 + resp.level * 0.7
+      audioLevel.value = smoothLevel
+    }
+  } catch {}
+}
+
+onMounted(() => { levelPollTimer = setInterval(pollLevel, 300) })
+onUnmounted(() => { if (levelPollTimer) clearInterval(levelPollTimer) })
 
 const statusClass = computed(() => {
   const text = settingsStore.statusText || ''
