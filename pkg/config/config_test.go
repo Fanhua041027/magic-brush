@@ -1,10 +1,18 @@
 package config
 
 import (
+	"os"
 	"sync"
 	"testing"
 	"time"
 )
+
+// newTestConfigManager 创建使用临时路径的 ConfigManager（避免污染真实配置）
+func newTestConfigManager() *ConfigManager {
+	dir, _ := os.MkdirTemp("", "config-test-*")
+	cm := NewConfigManagerForTest(dir)
+	return cm
+}
 
 func TestNewDefaultConfig(t *testing.T) {
 	cfg := NewDefaultConfig()
@@ -139,7 +147,7 @@ func TestValidationError(t *testing.T) {
 
 func TestConfigManager(t *testing.T) {
 	t.Run("default config on fresh manager", func(t *testing.T) {
-		cm := NewConfigManager()
+		cm := newTestConfigManager()
 		cfg := cm.Get()
 		if cfg.APIKey != "" {
 			t.Fatal("expected empty API key initially")
@@ -147,7 +155,7 @@ func TestConfigManager(t *testing.T) {
 	})
 
 	t.Run("patch updates config", func(t *testing.T) {
-		cm := NewConfigManager()
+		cm := newTestConfigManager()
 		err := cm.Patch(func(cfg *Config) {
 			cfg.APIKey = "test-key"
 			cfg.Model = "test-model"
@@ -165,7 +173,7 @@ func TestConfigManager(t *testing.T) {
 	})
 
 	t.Run("subscribe receives updates", func(t *testing.T) {
-		cm := NewConfigManager()
+		cm := newTestConfigManager()
 		var mu sync.Mutex
 		received := ""
 		cm.Subscribe(func(newCfg, oldCfg Config) {
@@ -176,7 +184,6 @@ func TestConfigManager(t *testing.T) {
 		cm.Patch(func(cfg *Config) {
 			cfg.APIKey = "new-key"
 		})
-		// Give subscriber time to fire
 		time.Sleep(50 * time.Millisecond)
 		mu.Lock()
 		if received != "new-key" {
@@ -186,7 +193,7 @@ func TestConfigManager(t *testing.T) {
 	})
 
 	t.Run("multiple patches accumulate", func(t *testing.T) {
-		cm := NewConfigManager()
+		cm := newTestConfigManager()
 		cm.Patch(func(cfg *Config) {
 			cfg.APIKey = "key1"
 			cfg.Model = "model1"

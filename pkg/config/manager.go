@@ -29,6 +29,17 @@ func NewConfigManager() *ConfigManager {
 	return cm
 }
 
+// NewConfigManagerForTest 创建用于测试的 ConfigManager（使用临时路径）
+func NewConfigManagerForTest(tempDir string) *ConfigManager {
+	cm := &ConfigManager{
+		config:      NewDefaultConfig(),
+		oldConfig:   NewDefaultConfig(),
+		subscribers: make([]func(NewConfig Config, oldConfig Config), 0),
+	}
+	cm.configPath = filepath.Join(tempDir, "config-test")
+	return cm
+}
+
 func (cm *ConfigManager) getConfigPath() string {
 	var appDir string
 

@@ -81,7 +81,10 @@ func (a *App) Startup(ctx context.Context) {
 	// Start Python sidecar
 	a.sidecar = sidecar.NewManager(18765)
 	go func() {
-		sttService := "qwen_cloud"
+		sttService := cfg.STTService
+		if sttService == "" {
+			sttService = "qwen_cloud" // fallback
+		}
 		if err := a.sidecar.Start(cfg.STTModel, cfg.STTDevice, cfg.STTLanguage, cfg.STTSensitivity, sttService); err != nil {
 			logger.Printf("[Sidecar] Start failed: %v", err)
 		} else if cfg.KBPath != "" {
