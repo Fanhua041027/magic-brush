@@ -267,7 +267,23 @@ class AudioRecorder:
                 if overflowed:
                     print("[Audio] Buffer overflow", flush=True)
 
-                audio = data[:, 0].copy()
+                if data is None or data.size == 0:
+                    time.sleep(0.01)
+                    continue
+
+                if data.ndim > 1:
+                    audio = data[:, 0].copy()
+                else:
+                    audio = data.copy()
+
+                try:
+                    rms_val = np.sqrt(np.mean(audio ** 2))
+                    if np.isnan(rms_val) or np.isinf(rms_val):
+                        rms = 0.0
+                    else:
+                        rms = float(rms_val)
+                except Exception:
+                    rms = 0.0
                 rms = float(np.sqrt(np.mean(audio ** 2)))
 
                 # 更新 VU 表电平（无论是否录音都更新）

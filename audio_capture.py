@@ -60,13 +60,14 @@ def list_devices() -> list[dict]:
             name_lower = name.lower()
 
             device_type = "mic"
-            if any(kw in name_lower for kw in ["立体声混音", "stereo mix", "what u hear",
-                                                 "wave out", "混合输出", "loopback",
-                                                 "音频输出", "speaker")]:
+            stereo_mix_kw = ["立体声混音", "stereo mix", "what u hear", "wave out", "混合输出", "loopback", "音频输出", "speaker"]
+            mic_kw = ["麦克风", "microphone", "mic"]
+            line_in_kw = ["line in", "线路输入", "辅助"]
+            if any(kw in name_lower for kw in stereo_mix_kw):
                 device_type = "stereo_mix"
-            elif any(kw in name_lower for kw in ["麦克风", "microphone", "mic"]):
+            elif any(kw in name_lower for kw in mic_kw):
                 device_type = "mic"
-            elif any(kw in name_lower for kw in ["line in", "线路输入", "辅助"]):
+            elif any(kw in name_lower for kw in line_in_kw):
                 device_type = "line_in"
 
             host_api_idx = d.get('host_api', 0) if isinstance(d, dict) else d.host_api

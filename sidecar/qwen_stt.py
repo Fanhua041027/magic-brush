@@ -434,8 +434,6 @@ class QwenSTT:
                 with self._buffer_lock:
                     if self._audio_buffer:
                         audio_data = np.concatenate(self._audio_buffer, axis=0).flatten()
-                        # 保留最后一个块用于增量（防止丢失边界）
-                        buffer_copy = list(self._audio_buffer)
                         self._audio_buffer = []
 
                 try:

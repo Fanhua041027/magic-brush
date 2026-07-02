@@ -226,17 +226,16 @@ async function toggleListen() {
       // Generate answer - ChatWithDeepSeek returns plain text, not JSON
       const answerResult = await api.generateInterviewAnswer(transcribe.text)
       if (answerResult) {
-        // Check if it's a JSON error response
         try {
           const parsed = JSON.parse(answerResult)
           if (parsed.error) throw new Error(parsed.error)
           answerText.value = parsed.answer || parsed.text || answerResult
         } catch (parseErr) {
-          // Not JSON - it's plain text from ChatWithDeepSeek, use directly
-          if (parseErr.message && parseErr.message !== answerResult) {
+          if (parseErr instanceof SyntaxError) {
+            answerText.value = answerResult
+          } else {
             throw parseErr
           }
-          answerText.value = answerResult
         }
       }
 
