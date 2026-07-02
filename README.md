@@ -84,30 +84,54 @@
 |:-----|:------|
 | 🎤 按住说话 | `左 Alt` 按住录音，松开自动识别 |
 | 🔄 流式转写 | 边说边识别，实时显示识别结果 |
-| 🌐 多服务支持 | 千问云端 / 千问本地 / 本地 Whisper 三种模式 |
-| 🎛️ 音频输入 | 支持麦克风和立体声混音切换 |
-| ⚡ CUDA 加速 | 本地 Whisper 支持 GPU 加速推理 |
+| 🌐 多服务备份 | 千问云端→千问本地→Whisper 自动降级 |
+| 🔊 **VU 电平表** | 实时可视化音频输入电平（四色指示） |
+| 🎛️ 音频输入 | 支持麦克风和立体声混音切换，设备自动检测 |
+| ⚡ 音频增强 | 噪声门控 + RMS 归一化，弱音频识别率提升 |
+| 🔑 API Key | 支持 `DASHSCOPE_API_KEY` 环境变量 |
 
-### 📚 知识库搜索
+### 📚 知识库搜索（已优化）
 | 功能 | 说明 |
 |:-----|:------|
-| 🔎 TF-IDF 检索 | 本地 Markdown 知识库相关性匹配 |
-| 📁 Markdown 格式 | 支持目录导入，自动解析章节结构 |
+| ⚡ **反向索引** | 搜索速度提升 10~50 倍 |
+| 💾 **LRU 缓存** | 256 条查询缓存，重复查询零延迟 |
+| 📁 Markdown | 支持目录导入，自动解析 ## / ### 章节 |
 | 🤖 自动注入 | 对话时自动检索并注入上下文 |
+| 🔍 标题加权 | 匹配标题的内容获得 1.5x 评分 |
 
 ### 🛡️ 隐身防御 (Ghost Mode)
 | 功能 | 说明 |
 |:-----|:------|
-| 🚫 防截屏 | `SetWindowDisplayAffinity` 防止被系统截屏捕获 |
-| 👻 隐藏任务栏 | `WS_EX_TOOLWINDOW` 隐藏任务栏图标 |
+| 🚫 防录屏 | `WDA_EXCLUDEFROMCAPTURE` 窗口不可被捕获 |
+| 👻 隐藏任务栏 | `WS_EX_TOOLWINDOW` 无任务栏图标 |
 | 🖥️ 无边框 | 完全无边框窗口，沉浸式体验 |
-| 🔒 隐私保护 | 悬浮窗默认不进录屏，保护面试隐私 |
+| 🌓 Win10 兼容 | `SetWindowCompositionAttribute` 消除 DWM 模糊 |
+| 🔄 Win11 自动适配 | 系统版本检测，差异化渲染策略 |
+
+### 🎧 聆听助手（系统音频捕获）
+| 功能 | 说明 |
+|:-----|:------|
+| 🎯 **捕获面试官提问** | 自动检测立体声混音设备，捕获电脑内部声音 |
+| 🔄 自动管线 | 音频捕获 → 转写 → AI 生成回答 |
+| 🔊 **VU 电平表** | 实时显示系统音频输入电平 |
+| 🎛️ 设备选择 | 手动切换音频源（立体声混音/麦克风） |
+| 📋 一键复制 | 生成回答后一键复制到剪贴板 |
+
+### 🤖 多 Agent 系统（AskCc 架构）
+| Agent | 功能 |
+|:------|:------|
+| 👤 **Profile Agent** | 简历/JD 摘要、技能卡片、面试快照 |
+| 🎯 **Interview Agent** | Router→Retrieve→Prepare→Agent 管线 |
+| 📝 **Exam Agent** | 截图 OCR → 题型分类 → 针对性求解 |
+| 🎪 **Mock Interview** | AI 出题 → 回答评分 → 汇总分析 |
 
 ### 💡 其他亮点
 - **📋 简历集成** — 上传简历后 AI 自动参考你的背景回答问题
 - **🔑 多模型支持** — OpenAI 兼容接口，支持 DeepSeek / 千问 / OpenRouter 等
 - **🎨 深色主题** — 护眼深色模式，支持主题切换
-- **💾 本地存储** — 配置和对话历史全部本地保存
+- **💾 本地存储** — 配置和对话历史全部本地保存（AES-256 加密）
+- **🩺 健康监控** — 服务故障自动检测，冷却期后自动恢复
+- **🔒 API Key 安全** — 优先读取环境变量，源码不含硬编码密钥
 
 ---
 
@@ -167,11 +191,31 @@ wails build -skipbindings
 # 构建产物位于 build/bin/ShenbiMaliang.exe
 ```
 
+### 高级启动选项
+
+```bash
+# 开发者模式（前端热重载）
+wails dev -skipbindings
+
+# 构建生产版本
+wails build -skipbindings
+
+# 构建产物
+# build/bin/ShenbiMaliang.exe
+
+# 隐藏启动（托盘模式）
+ShenbiMaliang.exe --minimized
+
+# 独立面试窗口
+ShenbiMaliang.exe --standalone
+```
+
 ### ⚠️ 首次使用
 
 1. 启动后在**设置**中配置 **API Key**（DeepSeek / OpenAI 兼容接口）
 2. 可选：上传简历 → AI 在回答时会参考你的个人背景
 3. 可选：导入知识库（Markdown 格式目录） → 自动注入面试相关知识
+4. **立体声混音（可选）**：如需捕获系统内部音频，在声卡属性中启用「立体声混音」设备
 
 ---
 
@@ -242,55 +286,67 @@ wails build -skipbindings
 
 ```
 magic-brush/
-├── main.go                  # 应用入口（支持 --standalone-interview 参数）
+├── .golangci.yml          # Go lint 配置
+├── main.go                  # 应用入口（支持 --standalone / --minimized）
 ├── wails.json               # Wails 配置文件
 │
 ├── app/                     # Go 后端应用逻辑
 │   ├── app.go              # 应用主入口 + Startup/Shutdown
-│   ├── chat.go             # AI 对话（流式 + 非流式）
-│   ├── ai.go               # STT 绑定 + 截图解题
-│   ├── solve.go            # 解题引擎逻辑
+│   ├── ai.go               # STT/KB 前端绑定
+│   ├── chat.go             # AI 对话（流式 + 非流式 + 截图追问）
+│   ├── solve.go            # 解题引擎（截图缓冲区管理）
+│   ├── system_audio.go     # 系统音频捕获（立体声混音）
 │   ├── screen.go           # 屏幕截图绑定
 │   ├── shortcut.go         # 快捷键处理
-│   ├── inject.go           # 上下文注入
-│   └── window.go           # 窗口操作
+│   ├── inject.go           # 剪贴板文字注入
+│   ├── misc.go             # 杂项功能
+│   ├── llm.go              # LLM 连接测试
+│   ├── settings.go         # 设置读写
+│   ├── window.go           # 窗口操作
+│   └── resume.go           # 简历管理
 │
 ├── pkg/                    # Go 核心包
+│   ├── agent/             # 多 Agent 系统
 │   ├── llm/               # LLM Provider 抽象层
-│   ├── config/            # 配置管理（AES 加密）
-│   ├── shortcut/          # 全局快捷键系统
+│   ├── config/            # 配置管理（AES-256-GCM 加密）
+│   ├── shortcut/          # 全局快捷键系统（低层钩子）
 │   ├── screen/            # 截图服务
 │   ├── solution/          # 解题引擎
 │   ├── sidecar/           # Python Sidecar 进程管理
 │   ├── platform/          # Windows/macOS 平台 API
+│   ├── task/              # 任务协调器
+│   ├── state/             # 窗口状态管理
+│   ├── logger/            # 日志
 │   └── tools/             # 工具函数
 │
 ├── frontend/              # Vue 3 前端
 │   ├── src/
-│   │   ├── components/    # Vue 组件（20+ 个组件）
+│   │   ├── components/    # 30+ 个 Vue 组件
 │   │   │   ├── ChatDialog.vue           # AI 辅助面试三栏面板
 │   │   │   ├── StandaloneInterviewPanel.vue  # 独立面试窗口
-│   │   │   ├── TutorialWizard.vue       # 入門教程向导
-│   │   │   └── ...                      # 其他组件
-│   │   ├── stores/        # Pinia 状态管理
-│   │   │   ├── chat.js    # 聊天状态（含多会话管理）
-│   │   │   ├── settings.js # 设置状态
+│   │   │   ├── STTButton.vue            # 语音按钮 + VU 电平表
+│   │   │   ├── MockOverlay.vue          # 聆听助手悬浮窗
 │   │   │   └── ...
+│   │   ├── stores/        # Pinia 状态管理（7 个 store）
 │   │   ├── services/      # API 服务层
-│   │   └── utils/         # 工具函数（Markdown 渲染等）
+│   │   └── utils/         # 工具函数
 │   └── wailsjs/           # Wails 自动生成的 JS 绑定
 │
 ├── sidecar/               # Python Sidecar
-│   ├── main.py            # Flask HTTP 服务 + WebSocket
-│   ├── transcribe.py      # Whisper 语音转写
-│   ├── audio.py           # 音频录制
-│   ├── knowledge_base.py  # TF-IDF 知识库
-│   ├── qwen_stt.py        # 千问云端 STT
-│   └── qwen_asr_local.py  # 千问本地 ASR
+│   ├── main.py            # Flask HTTP + WebSocket 服务
+│   ├── audio.py           # 音频录制（线程安全）
+│   ├── stt_manager.py     # STT 管理器（服务链/备份）
+│   ├── qwen_stt.py        # 千问云端 ASR
+│   ├── qwen_asr_local.py  # 千问本地 ASR
+│   ├── transcribe.py      # Whisper 转写
+│   ├── knowledge_base.py  # TF-IDF 知识库（反向索引+缓存）
+│   └── error_handler.py   # 错误处理（健康监控/自动恢复）
+│
+├── audio_capture.py       # 系统音频捕获脚本
 │
 └── build/                 # 构建输出
     └── bin/
-        └── ShenbiMaliang.exe  # 可执行文件
+        └── ShenbiMaliang.exe  # 可执行文件（22MB）
 ```
 
 ---
