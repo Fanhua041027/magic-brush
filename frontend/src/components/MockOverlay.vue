@@ -29,6 +29,31 @@
               </div>
             </div>
           </div>
+
+          <!-- Device selector & VU meter -->
+          <div class="device-row" v-if="audioDevices.length > 0 && !isProcessing">
+            <div class="device-select-group">
+              <label class="dev-label">音频源</label>
+              <select v-model.number="audioDeviceId" class="device-select" :disabled="isListening">
+                <option
+                  v-for="d in audioDevices"
+                  :key="d.index"
+                  :value="d.index"
+                >{{ d.name }} {{ d.type === 'stereo_mix' ? '🎵' : '🎤' }}</option>
+              </select>
+            </div>
+            <div class="vu-group">
+              <label class="dev-label">电平</label>
+              <div class="vu-meter-slim">
+                <div class="vu-track">
+                  <div class="vu-fill" :style="{ width: Math.min(100, audioLevel * 150) + '%' }"
+                    :class="audioLevel < 0.02 ? 'vu-low' : audioLevel < 0.05 ? 'vu-mid' : audioLevel < 0.15 ? 'vu-high' : 'vu-peak'">
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
           <div class="device-info" v-if="!isListening && !transcribedText && !answerText">
             系统将捕获电脑内部声音（面试官的提问），自动转录并生成回答
           </div>
@@ -71,14 +96,12 @@
 </template>
 
 <script setup>
-import { ref, computed, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import Icon from './Icon.vue'
 import { api } from '../services/api'
-import { useAgentStore } from '../stores/agents'
 import { on } from '../services/events'
 
 const emit = defineEmits(['close'])
-const agents = useAgentStore()
 
 // State
 const isListening = ref(false)
@@ -87,7 +110,12 @@ const transcribedText = ref('')
 const answerText = ref('')
 const pipelineEvents = ref([])
 const listenTimer = ref(null)
-const audioDeviceId = ref(25) // Stereo Mix default
+const audioDevices = ref([])
+const audioDeviceId = ref(null)
+const audioLevel = ref(0)
+
+let levelPollTimer = null
+let smoothLevel = 0
 
 const statusText = computed(() => {
   if (isProcessing.value) return '正在处理...'
@@ -102,6 +130,34 @@ const statusClass = computed(() => {
   if (isListening.value) return 'listening'
   if (answerText.value) return 'done'
   return 'idle'
+})
+
+// Load available audio devices on mount
+onMounted(async () => {
+  try {
+    const result = await api.audioListDevices()
+    if (result) {
+      const parsed = typeof result === 'string' ? JSON.parse(result) : result
+      if (Array.isArray(parsed)) {
+        audioDevices.value = parsed
+        // Select stereo mix by default
+        const stereoMix = parsed.find(d => d.type === 'stereo_mix')
+        if (stereoMix) audioDeviceId.value = stereoMix.index
+        else if (parsed.length > 0) audioDeviceId.value = parsed[0].index
+      }
+    }
+  } catch (_) {}
+
+  // Poll audio level
+  levelPollTimer = setInterval(async () => {
+    try {
+      const resp = await api.audioLevel()
+      if (resp && typeof resp.level === 'number') {
+        smoothLevel = smoothLevel * 0.3 + resp.level * 0.7
+        audioLevel.value = smoothLevel
+      }
+    } catch {}
+  }, 200)
 })
 
 // Listen for pipeline events
@@ -125,33 +181,39 @@ async function toggleListen() {
     isListening.value = false
     isProcessing.value = true
     pipelineEvents.value = []
+    if (listenTimer.value) clearTimeout(listenTimer.value)
 
     try {
-      // Find available audio device
+      pipelineEvents.value.unshift({ stage: 'capture', status: 'running', detail: '捕获系统音频...' })
+
+      // Determine device
       let deviceId = audioDeviceId.value
-      try {
+      if (deviceId == null) {
         const avail = await api.audioIsAvailable()
         if (avail) {
-          const parsed = JSON.parse(avail)
+          const parsed = typeof avail === 'string' ? JSON.parse(avail) : avail
           if (parsed.available && parsed.deviceId >= 0) {
             deviceId = parsed.deviceId
           }
         }
-      } catch (_) {}
+      }
+      if (deviceId == null) deviceId = 25 // fallback
 
       // Capture system audio (8 seconds)
       const captureResult = await api.audioCapture(deviceId, 8)
       if (!captureResult) throw new Error('音频捕获失败')
 
-      const capture = JSON.parse(captureResult)
+      const capture = typeof captureResult === 'string' ? JSON.parse(captureResult) : captureResult
       if (capture.error) throw new Error(capture.error)
       if (!capture.base64) throw new Error('未捕获到音频数据')
+
+      pipelineEvents.value.unshift({ stage: 'transcribe', status: 'running', detail: '转写音频...' })
 
       // Transcribe
       const transcribeResult = await api.audioTranscribe(capture.base64)
       if (!transcribeResult) throw new Error('转录失败')
 
-      const transcribe = JSON.parse(transcribeResult)
+      const transcribe = typeof transcribeResult === 'string' ? JSON.parse(transcribeResult) : transcribeResult
       if (transcribe.error) throw new Error(transcribe.error)
       if (!transcribe.text || transcribe.text.trim().length < 3) {
         throw new Error('未检测到语音内容，请重试')
@@ -159,15 +221,26 @@ async function toggleListen() {
 
       transcribedText.value = transcribe.text
 
-      // Generate answer directly via Interview Agent (non-streaming)
+      pipelineEvents.value.unshift({ stage: 'answer', status: 'running', detail: '生成回答...' })
+
+      // Generate answer - ChatWithDeepSeek returns plain text, not JSON
       const answerResult = await api.generateInterviewAnswer(transcribe.text)
       if (answerResult) {
-        const parsed = JSON.parse(answerResult)
-        if (parsed.error) throw new Error(parsed.error)
-        if (parsed.answer) {
-          answerText.value = parsed.answer
+        // Check if it's a JSON error response
+        try {
+          const parsed = JSON.parse(answerResult)
+          if (parsed.error) throw new Error(parsed.error)
+          answerText.value = parsed.answer || parsed.text || answerResult
+        } catch (parseErr) {
+          // Not JSON - it's plain text from ChatWithDeepSeek, use directly
+          if (parseErr.message && parseErr.message !== answerResult) {
+            throw parseErr
+          }
+          answerText.value = answerResult
         }
       }
+
+      pipelineEvents.value.unshift({ stage: 'complete', status: 'done', detail: '完成' })
 
     } catch (e) {
       transcribedText.value = ''
@@ -195,16 +268,12 @@ async function toggleListen() {
   }
 }
 
-
-
 function copyAnswer() {
   if (answerText.value) {
     navigator.clipboard.writeText(answerText.value)
-    // Toast
-    const event = new CustomEvent('app-toast', {
+    window.dispatchEvent(new CustomEvent('app-toast', {
       detail: { text: '回答已复制', type: 'success' }
-    })
-    window.dispatchEvent(event)
+    }))
   }
 }
 
@@ -218,6 +287,7 @@ function reset() {
 
 onUnmounted(() => {
   if (listenTimer.value) clearTimeout(listenTimer.value)
+  if (levelPollTimer) clearInterval(levelPollTimer)
 })
 </script>
 
@@ -333,6 +403,65 @@ onUnmounted(() => {
   color: var(--text-muted);
   line-height: 1.5;
 }
+
+/* Device row with VU meter */
+.device-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  margin-top: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--surface-card);
+  border-radius: var(--radius-sm);
+}
+.device-select-group {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  flex: 1;
+  min-width: 0;
+}
+.dev-label {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.device-select {
+  flex: 1;
+  min-width: 0;
+  max-width: 200px;
+  padding: 2px 6px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-xs);
+  background: var(--surface-base);
+  color: var(--text-primary);
+  font-size: 10px;
+  cursor: pointer;
+  outline: none;
+}
+.device-select:disabled { opacity: 0.5; cursor: not-allowed; }
+.vu-group {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+.vu-meter-slim { width: 80px; }
+.vu-track {
+  height: 6px;
+  background: var(--surface-base);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.vu-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.1s ease, background 0.2s ease;
+}
+.vu-low { background: var(--color-success); }
+.vu-mid { background: var(--color-warning); }
+.vu-high { background: #ff9800; }
+.vu-peak { background: var(--color-error); }
 
 /* Pipeline Events */
 .pipeline-bar {
