@@ -19,35 +19,41 @@ var assets embed.FS
 
 func main() {
 	isStandalone := false
+	startMinimized := false
 	for _, arg := range os.Args[1:] {
 		if arg == "--standalone-interview" || arg == "--standalone" {
 			isStandalone = true
-			break
+		}
+		if arg == "--minimized" || arg == "--hidden" {
+			startMinimized = true
 		}
 	}
 
 	if isStandalone {
 		runStandaloneInterview()
 	} else {
-		runMainApp()
+		runMainApp(startMinimized)
 	}
 }
 
-func runMainApp() {
+func runMainApp(startMinimized bool) {
 	// Windows 专用环境变量
 	if runtime.GOOS == "windows" {
 		os.Setenv("WEBVIEW2_ADDITIONAL_BROWSER_ARGS", "--disable-gpu")
 	}
 
-	app := application.NewApp("")
+	mode := ""
+	if startMinimized {
+		mode = "--minimized"
+	}
+	app := application.NewApp(mode)
 	err := wails.Run(&options.App{
 		Title:     "",
 		Width:     1024,
 		Height:    768,
 		MinWidth:  520,
 		MinHeight: 400,
-		MaxWidth:  0,
-		MaxHeight: 0,
+		StartHidden: startMinimized,
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 		},

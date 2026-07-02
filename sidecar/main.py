@@ -1,8 +1,13 @@
-"""AI-Assistant Sidecar: HTTP server providing STT + KB search services."""
+"""AI-Assistant Sidecar: HTTP server providing STT + KB search services.
+
+支持优雅关闭（SIGINT/SIGTERM）和资源清理。
+"""
 
 import argparse
+import atexit
 import json
 import os
+import signal
 import sys
 import threading
 import time
@@ -46,6 +51,67 @@ _audio_level_lock = threading.Lock()
 
 # 千问 API Key — 优先从环境变量读取，其次硬编码
 QWEN_API_KEY = os.environ.get("DASHSCOPE_API_KEY", "sk-3ced1755eb8a44628ce5ff1e5789f4b7")
+
+
+# ── 关闭与资源管理 ─────────────────────────────────────────
+
+_shutting_down = False
+
+
+@app.route("/api/shutdown", methods=["POST"])
+def api_shutdown():
+    """优雅关闭服务"""
+    global _shutting_down
+    _shutting_down = True
+    print("[Sidecar] 正在优雅关闭...", flush=True)
+    cleanup_resources()
+
+    def delayed_shutdown():
+        time.sleep(0.5)
+        os._exit(0)
+
+    threading.Thread(target=delayed_shutdown, daemon=True).start()
+    return jsonify({"status": "shutting_down"})
+
+
+@app.route("/api/cleanup", methods=["POST"])
+def api_cleanup():
+    """清理资源但不关闭"""
+    cleanup_resources()
+    return jsonify({"status": "cleaned"})
+
+
+def cleanup_resources():
+    """清理所有资源（线程安全）"""
+    global recorder, kb
+    rec = recorder
+    if rec is not None:
+        try:
+            rec.close()
+            print("[Sidecar] Audio recorder closed", flush=True)
+        except Exception as e:
+            print(f"[Sidecar] Recorder close error: {e}", flush=True)
+    recorder = None
+    kb = None
+    print("[Sidecar] Resources cleaned up", flush=True)
+
+
+def signal_handler(signum, frame):
+    """Signal handler for graceful shutdown"""
+    global _shutting_down
+    if _shutting_down:
+        print("[Sidecar] Force exit...", flush=True)
+        os._exit(1)
+    _shutting_down = True
+    print(f"[Sidecar] Signal {signum}, shutting down...", flush=True)
+    cleanup_resources()
+    os._exit(0)
+
+
+# Register signal handlers
+signal.signal(signal.SIGINT, signal_handler)
+signal.signal(signal.SIGTERM, signal_handler)
+atexit.register(cleanup_resources)
 
 
 # ── Health ──────────────────────────────────────────────────────────────

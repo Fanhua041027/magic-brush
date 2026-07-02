@@ -9,6 +9,16 @@ import (
 	"unsafe"
 )
 
+//go:nocheckptr
+func ptrToKBDLL(p uintptr) *platform.KBDLLHOOKSTRUCT {
+	return (*platform.KBDLLHOOKSTRUCT)(unsafe.Pointer(p))
+}
+
+//go:nocheckptr
+func ptrToMSLL(p uintptr) *platform.MSLLHOOKSTRUCT {
+	return (*platform.MSLLHOOKSTRUCT)(unsafe.Pointer(p))
+}
+
 type Manager struct {
 	hHook           uintptr
 	hMouseHook      uintptr
@@ -132,7 +142,7 @@ func keyboardHookProc(nCode int, wParam uintptr, lParam uintptr) uintptr {
 	// 只有当 nCode >= 0 时才处理消息，否则直接放行
 	if nCode >= 0 {
 		// 将 lParam 指针转换为键盘钩子结构体
-		kbd := (*platform.KBDLLHOOKSTRUCT)(unsafe.Pointer(lParam))
+		kbd := ptrToKBDLL(lParam)
 
 		// Push-to-talk: Left Alt 长按录音 (异步调用避免阻塞键盘钩子)
 		if kbd.VkCode == VK_LMENU {
@@ -188,7 +198,7 @@ func mouseHookProc(nCode int, wParam uintptr, lParam uintptr) uintptr {
 		return 0
 	}
 	if nCode >= 0 {
-		mouseStruct := (*platform.MSLLHOOKSTRUCT)(unsafe.Pointer(lParam))
+		mouseStruct := ptrToMSLL(lParam)
 		var vkCode uint32
 		isDown := false
 		isUp := false

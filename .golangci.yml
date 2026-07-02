@@ -1,0 +1,76 @@
+# golangci-lint configuration for Magic Brush (神笔马良)
+# See https://golangci-lint.run/usage/configuration/
+
+run:
+  # Timeout for analysis
+  timeout: 5m
+  # Include test files
+  tests: true
+  # Skip auto-generated and vendor directories
+  skip-dirs:
+    - frontend
+    - build
+    - assets
+    - script
+
+linters:
+  enable:
+    - errcheck       # Check for unchecked errors
+    - gosimple       # Simplify code
+    - govet          # Standard vet
+    - ineffassign    # Detect ineffective assignments
+    - staticcheck    # Static analysis
+    - unused         # Check unused code
+    - unconvert      # Remove unnecessary type conversions
+    - revive         # Style checker (replacement for golint)
+    - gofmt          # Check formatting
+    - gocyclo        # Cyclomatic complexity
+    - misspell       # Spelling errors in comments
+    - prealloc       # Suggest pre-allocation of slices
+    - stylecheck     # Style conventions
+    - whitespace     # Whitespace rules
+  disable:
+    - lll            # Don't enforce line length
+    - gochecknoglobals  # Allow globals
+
+linters-settings:
+  govet:
+    check-shadowing: true
+    enable-all: true
+  gocyclo:
+    min-complexity: 20
+  errcheck:
+    check-type-assertions: true
+    check-blank: true
+  revive:
+    rules:
+      - name: exported
+        severity: warning
+        disabled: true  # Allow unexported comments for brevity
+      - name: blank-imports
+        severity: warning
+  staticcheck:
+    checks: ["all"]
+  misspell:
+    locale: US
+
+issues:
+  # Maximum issues per one linter
+  max-issues-per-linter: 0
+  # Maximum issues per file
+  max-same-issues: 3
+  exclude-rules:
+    # Exclude some linters from test files
+    - path: _test\.go
+      linters:
+        - errcheck
+        - gocyclo
+    # Exclude generated files
+    - path: wailsjs
+      linters:
+        - all
+    # Allow magic numbers in config defaults
+    - path: pkg/config/config.go
+      text: "magic number"
+      linters:
+        - gomnd

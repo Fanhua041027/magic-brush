@@ -79,7 +79,10 @@ func setClipboardText(text string) error {
 	if pMem == 0 {
 		return syscall.GetLastError()
 	}
-	copy((*[1 << 20]uint16)(unsafe.Pointer(pMem))[:len(textBytes)], textBytes)
+	// Safe: Convert global lock pointer to slice for copying
+	p := unsafe.Pointer(pMem)
+	s := unsafe.Slice((*uint16)(p), len(textBytes))
+	copy(s, textBytes)
 	procGlobalUnlock.Call(hMem)
 
 	// 设置剪贴板数据
@@ -110,18 +113,17 @@ func getClipboardText() string {
 	}
 	defer procGlobalUnlock.Call(h)
 
-	// 读取 UTF-16 字符
-	text := ""
-	ptr := (*uint16)(unsafe.Pointer(p))
-	for {
-		if *ptr == 0 {
-			break
+	// 读取 UTF-16 字符为 Go string
+	// Safe: Convert to slice to avoid pointer arithmetic
+	const maxClipboardChars = 1 << 20
+	p2 := unsafe.Pointer(p)
+	chars := unsafe.Slice((*uint16)(p2), maxClipboardChars)
+	for i := 0; i < maxClipboardChars; i++ {
+		if chars[i] == 0 {
+			return syscall.UTF16ToString(chars[:i])
 		}
-		text += string(rune(*ptr))
-		ptr = (*uint16)(unsafe.Pointer(uintptr(unsafe.Pointer(ptr)) + 2))
 	}
-
-	return text
+	return ""
 }
 
 // simulateCtrlV 模拟 Ctrl+V 粘贴
