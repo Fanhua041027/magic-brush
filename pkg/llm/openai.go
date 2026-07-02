@@ -68,90 +68,22 @@ func (a *OpenAIAdapter) toOpenAIMessages(messages []Message) []openai.ChatComple
 func (a *OpenAIAdapter) toOpenAIParts(parts []ContentPart) []openai.ChatCompletionContentPartUnionParam {
 	result := make([]openai.ChatCompletionContentPartUnionParam, 0, len(parts))
 
-	hasNonText := false
-	for _, p := range parts {
-		if p.Type != ContentText {
-			hasNonText = true
-			break
-		}
-	}
-
-	// 检查模型是否支持图片输入
-	supportsVision := a.supportsVision()
-
-	// 如果不支持视觉，将所有非文本内容转为文本占位
-	if !supportsVision && hasNonText {
-		var textBuilder strings.Builder
-		for _, part := range parts {
-			if part.Type == ContentText {
-				textBuilder.WriteString(part.Text)
-				textBuilder.WriteString("\n")
-			} else {
-				textBuilder.WriteString("[用户上传了一张截图，请根据已提供的对话上下文回答问题]\n")
-			}
-		}
-		result = append(result, openai.TextContentPart(textBuilder.String()))
-		return result
-	}
-
 	for _, part := range parts {
 		switch part.Type {
 		case ContentText:
 			result = append(result, openai.TextContentPart(part.Text))
 		case ContentImage:
-			if supportsVision {
-				result = append(result, openai.ImageContentPart(openai.ChatCompletionContentPartImageImageURLParam{
-					URL: part.Base64,
-				}))
-			} else {
-				result = append(result, openai.TextContentPart("[图片]"))
-			}
+			result = append(result, openai.ImageContentPart(openai.ChatCompletionContentPartImageImageURLParam{
+				URL: part.Base64,
+			}))
 		case ContentPDF:
-			if supportsVision {
-				result = append(result, openai.ImageContentPart(openai.ChatCompletionContentPartImageImageURLParam{
-					URL: part.Base64,
-				}))
-			} else {
-				result = append(result, openai.TextContentPart("[PDF附件]"))
-			}
+			result = append(result, openai.ImageContentPart(openai.ChatCompletionContentPartImageImageURLParam{
+				URL: part.Base64,
+			}))
 		}
 	}
 
 	return result
-}
-
-// supportsVision 检查当前配置的模型是否支持图片/视觉输入
-func (a *OpenAIAdapter) supportsVision() bool {
-	model := strings.ToLower(a.config.Model)
-
-	// 明确不支持视觉的模型列表
-	noVisionModels := []string{
-		"deepseek", "deepseek-chat",
-		"deepseek-v3", "deepseek-r1",
-		"gpt-3.5", "gpt-4-turbo",
-	}
-
-	for _, nv := range noVisionModels {
-		if strings.Contains(model, nv) {
-			return false
-		}
-	}
-
-	// 明确支持视觉的模型列表
-	visionModels := []string{
-		"gpt-4o", "gpt-4.1", "gpt-4.5",
-		"claude-3", "claude-3.5", "claude-4", "claude-fable", "claude-opus", "claude-sonnet", "claude-haiku",
-		"gemini-2.0", "gemini-2.5",
-		"qwen3.6", "qwen-vl", "qwen2-vl", "qwen2.5-vl", "qwen2.5-vl",
-	}
-
-	for _, vm := range visionModels {
-		if strings.Contains(model, vm) {
-			return true
-		}
-	}
-
-	return false
 }
 
 func (a *OpenAIAdapter) GenerateContentStream(ctx context.Context, messages []Message, onChunk StreamCallback) (Message, error) {
