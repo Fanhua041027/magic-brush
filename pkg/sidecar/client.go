@@ -160,6 +160,27 @@ func (c *Client) STTStop() (*STTResult, error) {
 	return &result, nil
 }
 
+// STTTranscribe sends base64 WAV audio to the sidecar for transcription
+func (c *Client) STTTranscribe(audioBase64 string, sampleRate int) (*STTResult, error) {
+	body, _ := json.Marshal(map[string]interface{}{
+		"audio":       audioBase64,
+		"sample_rate": sampleRate,
+	})
+	resp, err := c.http.Post(c.baseURL+"/api/stt/transcribe", "application/json", bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	var result STTResult
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, err
+	}
+	if result.Error != "" {
+		return nil, fmt.Errorf("STT transcribe error: %s", result.Error)
+	}
+	return &result, nil
+}
+
 func (c *Client) STTStatus() (*STTStatus, error) {
 	resp, err := c.http.Get(c.baseURL + "/api/stt/status")
 	if err != nil {

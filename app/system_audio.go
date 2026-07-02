@@ -102,23 +102,28 @@ func (a *App) AudioCaptureWithEnhancement(deviceID int, durationSec float64) str
 	return a.AudioCapture(deviceID, durationSec)
 }
 
-// AudioTranscribe sends captured audio to supported API for transcription
-// Uses Qwen DashScope when available (from ScreenshotAPIKey), otherwise tries configured API
+// AudioTranscribe sends captured audio for transcription.
+// Prioritizes the sidecar STT pipeline (same as Left Alt), falls back to API call.
 func (a *App) AudioTranscribe(base64Data string) string {
-	cfg := a.configManager.Get()
+	// 优先走 sidecar STT 管线（与左 Alt 按键同一套，准确率更高）
+	if a.sidecar != nil && a.sidecar.IsRunning() {
+		result, err := a.sidecar.Client().STTTranscribe(base64Data, 16000)
+		if err == nil && result.Text != "" {
+			data, _ := json.Marshal(map[string]string{"text": result.Text})
+			return string(data)
+		}
+	}
 
-	// 优先使用 Qwen DashScope（与截图视觉模型共用 API Key），支持音频转写
+	// fallback: 通过 API 转写（OpenAI Whisper 等）
+	cfg := a.configManager.Get()
 	apiKey := cfg.ScreenshotAPIKey
 	baseURL := cfg.ScreenshotBaseURL
 	model := "paraformer-realtime-v2"
-
-	// fallback: 使用主配置（如 OpenAI Whisper）
 	if apiKey == "" {
 		apiKey = cfg.APIKey
 		baseURL = cfg.BaseURL
 		model = "whisper-1"
 	}
-
 	if apiKey == "" {
 		return `{"error":"API Key not configured"}`
 	}
@@ -128,29 +133,20 @@ func (a *App) AudioTranscribe(base64Data string) string {
 		baseURL += "/v1"
 	}
 
-	endpoint := baseURL + "/audio/transcriptions"
-
 	wavData, err := base64.StdEncoding.DecodeString(base64Data)
 	if err != nil {
 		return fmt.Sprintf(`{"error":"%s"}`, err.Error())
 	}
 
-	// Build multipart form
 	var b bytes.Buffer
 	writer := multipart.NewWriter(&b)
+	part, _ := writer.CreateFormFile("file", "capture.wav")
+	part.Write(wavData)
+	writer.WriteField("model", model)
+	writer.WriteField("language", "zh")
+	writer.Close()
 
-	part, err := writer.CreateFormFile("file", "capture.wav")
-	if err != nil {
-		return fmt.Sprintf(`{"error":"%s"}`, err.Error())
-	}
-	if _, err := part.Write(wavData); err != nil {
-		return fmt.Sprintf(`{"error":"%s"}`, err.Error())
-	}
-	_ = writer.WriteField("model", model)
-	_ = writer.WriteField("language", "zh")
-	_ = writer.Close()
-
-	req, err := http.NewRequestWithContext(context.Background(), "POST", endpoint, &b)
+	req, err := http.NewRequestWithContext(context.Background(), "POST", baseURL+"/audio/transcriptions", &b)
 	if err != nil {
 		return fmt.Sprintf(`{"error":"%s"}`, err.Error())
 	}
@@ -169,13 +165,8 @@ func (a *App) AudioTranscribe(base64Data string) string {
 		return fmt.Sprintf(`{"error":"API error %d: %s"}`, resp.StatusCode, string(body))
 	}
 
-	var result struct {
-		Text string `json:"text"`
-	}
-	if err := json.Unmarshal(body, &result); err != nil {
-		return fmt.Sprintf(`{"error":"%s"}`, err.Error())
-	}
-
+	var result struct{ Text string `json:"text"` }
+	json.Unmarshal(body, &result)
 	data, _ := json.Marshal(map[string]string{"text": result.Text})
 	return string(data)
 }

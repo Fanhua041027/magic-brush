@@ -434,6 +434,33 @@ def stt_record():
         return jsonify(error.to_dict()), 500
 
 
+# ── 系统音频转写 ───────────────────────────────────
+
+@app.route("/api/stt/transcribe", methods=["POST"])
+def stt_transcribe():
+    """接收 base64 WAV 音频，使用 STTManager 转写"""
+    if stt_manager is None or not stt_manager.is_any_ready():
+        return jsonify({"text": "", "error": "STT unavailable"}), 400
+    data = request.get_json(silent=True) or {}
+    audio_b64 = data.get("audio", "")
+    sr = data.get("sample_rate", 16000)
+    if not audio_b64:
+        return jsonify({"text": "", "error": "No audio"}), 400
+    try:
+        import base64 as b64
+        raw = b64.b64decode(audio_b64)
+        import io, soundfile as sf
+        audio_arr, rate = sf.read(io.BytesIO(raw))
+        if rate != sr:
+            from audio import _resample
+            audio_arr = _resample(audio_arr, rate)
+        text, used = stt_manager.recognize(audio_arr, sample_rate=sr)
+        return jsonify({"text": text, "service": used})
+    except Exception as e:
+        err = error_handler.handle_error(e, "stt_transcribe")
+        return jsonify({"text": "", "error": str(e)})
+
+
 # ── KB (Knowledge Base) ─────────────────────────────────────────────
 
 @app.route("/api/kb/info", methods=["GET"])
