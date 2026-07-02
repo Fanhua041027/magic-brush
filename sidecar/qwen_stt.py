@@ -113,28 +113,27 @@ def preprocess_audio(
         ).astype(np.float32)
         sample_rate = target_rate
 
-    # ── 步骤 3: RMS 归一化 ──
+    # Step 3: RMS normalization (conservative gain for system audio)
     rms = np.sqrt(np.mean(audio ** 2) + 1e-10)
     if rms > 0.0001:
-        target_rms = 0.08  # -22dBFS，略高于默认，提升弱音频
+        target_rms = 0.06
         gain = target_rms / rms
-        gain = min(max(gain, 0.5), 6.0)
+        gain = min(max(gain, 0.5), 3.0)
         audio = audio * gain
     else:
-        # 几乎静音
         return audio * 0.1
 
-    # ── 步骤 4: 噪声门控 ──
+    # Step 4: Noise gate (conservative, preserve system audio detail)
     if noise_reduction:
-        frame_size = int(sample_rate * 0.03)  # 30ms 帧
+        frame_size = int(sample_rate * 0.04)  # 40ms frames
         if frame_size > 0:
             for start in range(0, len(audio), frame_size):
                 end = min(start + frame_size, len(audio))
                 frame = audio[start:end]
                 frame_rms = np.sqrt(np.mean(frame ** 2) + 1e-10)
-                if frame_rms < 0.005:
-                    gain = (frame_rms / 0.005) ** 2
-                    audio[start:end] = frame * gain * 0.5
+                if frame_rms < 0.0015:
+                    gain = max(0.3, (frame_rms / 0.0015) ** 2)
+                    audio[start:end] = frame * gain
 
     # ── 步骤 5: 削波保护 ──
     return np.clip(audio, -1.0, 1.0)

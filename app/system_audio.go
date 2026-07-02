@@ -102,15 +102,28 @@ func (a *App) AudioCaptureWithEnhancement(deviceID int, durationSec float64) str
 	return a.AudioCapture(deviceID, durationSec)
 }
 
-// AudioTranscribe sends captured audio to Whisper for transcription
+// AudioTranscribe sends captured audio to supported API for transcription
+// Uses Qwen DashScope when available (from ScreenshotAPIKey), otherwise tries configured API
 func (a *App) AudioTranscribe(base64Data string) string {
 	cfg := a.configManager.Get()
-	apiKey := cfg.APIKey
+
+	// 优先使用 Qwen DashScope（与截图视觉模型共用 API Key），支持音频转写
+	apiKey := cfg.ScreenshotAPIKey
+	baseURL := cfg.ScreenshotBaseURL
+	model := "paraformer-realtime-v2"
+
+	// fallback: 使用主配置（如 OpenAI Whisper）
+	if apiKey == "" {
+		apiKey = cfg.APIKey
+		baseURL = cfg.BaseURL
+		model = "whisper-1"
+	}
+
 	if apiKey == "" {
 		return `{"error":"API Key not configured"}`
 	}
 
-	baseURL := strings.TrimRight(cfg.BaseURL, "/")
+	baseURL = strings.TrimRight(baseURL, "/")
 	if !strings.Contains(baseURL, "/v1") {
 		baseURL += "/v1"
 	}
@@ -133,7 +146,7 @@ func (a *App) AudioTranscribe(base64Data string) string {
 	if _, err := part.Write(wavData); err != nil {
 		return fmt.Sprintf(`{"error":"%s"}`, err.Error())
 	}
-	_ = writer.WriteField("model", "whisper-1")
+	_ = writer.WriteField("model", model)
 	_ = writer.WriteField("language", "zh")
 	_ = writer.Close()
 
@@ -144,8 +157,7 @@ func (a *App) AudioTranscribe(base64Data string) string {
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 
-	// 使用带超时的客户端
-	client := &http.Client{Timeout: 60 * time.Second}
+	client := &http.Client{Timeout: 120 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Sprintf(`{"error":"%s"}`, err.Error())

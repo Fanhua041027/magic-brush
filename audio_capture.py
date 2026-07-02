@@ -128,16 +128,15 @@ def _resample(audio: np.ndarray, orig_rate: int, target_rate: int = TARGET_SAMPL
     ).astype(np.float32)
 
 
-def apply_noise_gate(audio: np.ndarray, threshold: float = 0.002) -> np.ndarray:
+def apply_noise_gate(audio: np.ndarray, threshold: float = 0.001) -> np.ndarray:
     """
-    噪声门控：低于阈值的静音段淡出
-    减少底噪，提升识别率
+    噪声门控：仅对极低底噪做轻微衰减
+    立体声混音音频较干净，门控应保守
     """
     if len(audio) == 0:
         return audio
 
-    # 计算每个小块的 RMS
-    frame_size = int(TARGET_SAMPLE_RATE * 0.02)  # 20ms 帧
+    frame_size = int(TARGET_SAMPLE_RATE * 0.03)  # 30ms 帧
     if frame_size < 1:
         return audio
 
@@ -147,35 +146,29 @@ def apply_noise_gate(audio: np.ndarray, threshold: float = 0.002) -> np.ndarray:
         frame = audio[start:end]
         rms = np.sqrt(np.mean(frame ** 2) + 1e-10)
         if rms < threshold:
-            # 渐入渐出衰减
-            gain = max(0.0, (rms / threshold) ** 2)
-            result[start:end] = frame * gain * 0.3  # 大幅降低底噪
-        else:
-            # 对高能量段做轻微放大
-            gain = min(2.0, threshold / max(rms, 1e-10))
-            if gain < 1.0:
-                result[start:end] = frame * gain
+            gain = max(0.3, (rms / threshold) ** 2)
+            result[start:end] = frame * gain
+        # 高能量段不做放大，保持原始动态范围
 
     return result
 
 
-def normalize_audio(audio: np.ndarray, target_rms: float = 0.05) -> np.ndarray:
+def normalize_audio(audio: np.ndarray, target_rms: float = 0.04) -> np.ndarray:
     """
     音频归一化到目标 RMS 电平
-    提升低音量录音的识别率
+    保守增益，避免系统音频失真
     """
     if len(audio) == 0:
         return audio
 
     rms = np.sqrt(np.mean(audio ** 2) + 1e-10)
     if rms < 0.0001:
-        return audio  # 静音不处理
+        return audio
 
     gain = target_rms / rms
-    gain = min(max(gain, 0.5), 5.0)  # 限制增益范围 -6dB ~ +14dB
+    gain = min(max(gain, 0.5), 3.0)
     audio = audio * gain
 
-    # 削波保护
     return np.clip(audio, -1.0, 1.0)
 
 
