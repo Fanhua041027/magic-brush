@@ -142,7 +142,7 @@ func (a *OpenAIAdapter) supportsVision() bool {
 		"gpt-4o", "gpt-4.1", "gpt-4.5",
 		"claude-3", "claude-3.5", "claude-4", "claude-fable", "claude-opus", "claude-sonnet", "claude-haiku",
 		"gemini-2.0", "gemini-2.5",
-		"qwen-vl", "qwen2-vl", "qwen2.5-vl",
+		"qwen3.6", "qwen-vl", "qwen2-vl", "qwen2.5-vl", "qwen2.5-vl",
 	}
 
 	for _, vm := range visionModels {

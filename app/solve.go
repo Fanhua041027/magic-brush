@@ -1,6 +1,7 @@
 package app
 
 import (
+	"ai-assistant/pkg/llm"
 	"ai-assistant/pkg/logger"
 	"ai-assistant/pkg/solution"
 	"context"
@@ -235,6 +236,18 @@ func (a *App) solveInternal(ctx context.Context, screenshots []string) bool {
 				logger.Printf("[Solve] Injected %d KB sections", len(searchResult.Results))
 			}
 		}
+	}
+
+	// 有截图时自动切换到视觉模型（Qwen），F7 仍使用原模型（DeepSeek）
+	if len(screenshots) > 0 && cfg.ScreenshotAPIKey != "" {
+		visionCfg := cfg
+		visionCfg.APIKey = cfg.ScreenshotAPIKey
+		visionCfg.BaseURL = cfg.ScreenshotBaseURL
+		visionCfg.Model = cfg.ScreenshotModel
+		visionProvider := llm.NewOpenAIAdapter(&visionCfg)
+		a.solver.SetProvider(visionProvider)
+		defer a.solver.SetProvider(a.llmService.GetProvider())
+		logger.Printf("[Solve] 切换至视觉模型: %s", cfg.ScreenshotModel)
 	}
 
 	cb := solution.Callbacks{

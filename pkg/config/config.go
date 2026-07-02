@@ -10,8 +10,14 @@ type Config struct {
 	APIKey             string                         `json:"apiKey,omitempty"`
 	BaseURL            string                         `json:"baseURL,omitempty"`
 	Model              string                         `json:"model,omitempty"`
+
+	// 截图专用视觉模型（如 Qwen-VL），与 F7 聊天模型分离
+	ScreenshotAPIKey   string                         `json:"screenshotApiKey,omitempty"`
+	ScreenshotBaseURL  string                         `json:"screenshotBaseUrl,omitempty"`
+	ScreenshotModel    string                         `json:"screenshotModel,omitempty"`
+
 	Prompt             string                         `json:"prompt,omitempty"`
-	DomainId           string                         `json:"domainId,omitempty"` // 行业/岗位选择ID
+	DomainId           string                         `json:"domainId,omitempty"`
 	Opacity            float64                        `json:"opacity,omitempty"`
 	NoCompression      bool                           `json:"noCompression,omitempty"`
 	CompressionQuality int                            `json:"compressionQuality,omitempty"`
@@ -24,75 +30,70 @@ type Config struct {
 	ResumeContent      string                         `json:"resumeContent,omitempty"`
 	Shortcuts          map[string]shortcut.KeyBinding `json:"shortcuts,omitempty"`
 
-	// 辅助模型（用于总结对话生成问题导图）
 	AssistantModel string `json:"assistantModel,omitempty"`
 
-	// 窗口尺寸
 	WindowWidth  int `json:"windowWidth,omitempty"`
 	WindowHeight int `json:"windowHeight,omitempty"`
 
-	// 主题（light / dark）
 	Theme string `json:"theme,omitempty"`
 
-	// STT 语音转写
 	STTModel       string  `json:"sttModel,omitempty"`
 	STTDevice      string  `json:"sttDevice,omitempty"`
-	STTLanguage    string  `json:"sttLanguage,omitempty"`    // 语言：zh, en, auto
-	STTSensitivity float64 `json:"sttSensitivity,omitempty"` // 灵敏度：0.0-1.0
-	STTService     string  `json:"sttService,omitempty"`     // STT 服务：qwen, local
+	STTLanguage    string  `json:"sttLanguage,omitempty"`
+	STTSensitivity float64 `json:"sttSensitivity,omitempty"`
+	STTService     string  `json:"sttService,omitempty"`
 
-	// 知识库
 	KBPath string `json:"kbPath,omitempty"`
 }
 
 const DefaultModel = ""
+
+const (
+	DefaultScreenshotModel   = "qwen3.6-flash"
+	DefaultScreenshotBaseURL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+)
 
 func NewDefaultConfig() Config {
 	return Config{
 		APIKey:             "",
 		BaseURL:            "https://api.openai.com/v1",
 		Model:              DefaultModel,
+		ScreenshotModel:    DefaultScreenshotModel,
+		ScreenshotBaseURL:  DefaultScreenshotBaseURL,
 		ResumePath:         "",
 		Prompt:             "",
-		DomainId:           "general-assistant", // 默认选择通用的
+		DomainId:           "general-assistant",
 		Opacity:            1.0,
 		KeepContext:        false,
 		InterruptThinking:  false,
-		ScreenshotMode:     "fullscreen", // 默认全屏截图，确保捕获完整内容
-		NoCompression:      false,        // 保持压缩以减小文件大小
-		CompressionQuality: 92,           // 高质量压缩，确保 AI 清晰识别文字
-		Sharpening:         0.3,          // 适度锐化，增强文字边缘清晰度
-		Grayscale:          false,        // 保持彩色，某些场景颜色有意义
+		ScreenshotMode:     "fullscreen",
+		NoCompression:      false,
+		CompressionQuality: 92,
+		Sharpening:         0.3,
+		Grayscale:          false,
 		ResumeContent:      "",
 
 		Shortcuts: getDefaultShortcuts(),
 
-		// 辅助模型
 		AssistantModel: "",
 
-		// 窗口尺寸默认值
 		WindowWidth:  0,
 		WindowHeight: 0,
 
-		// 主题默认值
 		Theme: "light",
 
-		// STT
 		STTModel:       "base",
 		STTDevice:      "auto",
-		STTLanguage:    "zh",         // 默认中文
-		STTSensitivity: 0.5,        // 中等灵敏度
-		STTService:     "qwen_local", // 默认使用千问本地 ASR
+		STTLanguage:    "zh",
+		STTSensitivity: 0.5,
+		STTService:     "qwen_local",
 
-		// 知识库
 		KBPath: "",
 	}
 }
 
-// getDefaultShortcuts 根据平台返回默认快捷键配置
 func getDefaultShortcuts() map[string]shortcut.KeyBinding {
 	if runtime.GOOS == "darwin" {
-		// macOS 使用简化的快捷键（不依赖 Windows VK 码）
 		return map[string]shortcut.KeyBinding{
 			"solve":        {ComboID: "Cmd+1", KeyName: "⌘1"},
 			"send":         {ComboID: "Cmd+J", KeyName: "⌘J"},
@@ -107,7 +108,6 @@ func getDefaultShortcuts() map[string]shortcut.KeyBinding {
 			"scroll_down":  {ComboID: "Cmd+Option+Shift+Down", KeyName: "⌘⌥⇧↓"},
 		}
 	}
-	// Windows 默认快捷键
 	return map[string]shortcut.KeyBinding{
 		"screenshot":   {ComboID: "119", KeyName: "F8"},
 		"send":         {ComboID: "74+162", KeyName: "Ctrl+J"},
