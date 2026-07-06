@@ -4,6 +4,9 @@ export namespace config {
 	    apiKey?: string;
 	    baseURL?: string;
 	    model?: string;
+	    screenshotApiKey?: string;
+	    screenshotBaseUrl?: string;
+	    screenshotModel?: string;
 	    prompt?: string;
 	    domainId?: string;
 	    opacity?: number;
@@ -37,6 +40,9 @@ export namespace config {
 	        this.apiKey = source["apiKey"];
 	        this.baseURL = source["baseURL"];
 	        this.model = source["model"];
+	        this.screenshotApiKey = source["screenshotApiKey"];
+	        this.screenshotBaseUrl = source["screenshotBaseUrl"];
+	        this.screenshotModel = source["screenshotModel"];
 	        this.prompt = source["prompt"];
 	        this.domainId = source["domainId"];
 	        this.opacity = source["opacity"];

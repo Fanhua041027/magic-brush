@@ -61,6 +61,7 @@
                 <select v-model="audioDevice" class="stt-select" @change="onAudioDeviceChange">
                   <option value="mic">🎤 麦克风</option>
                   <option value="stereo_mix">🔊 立体声混音（电脑内部音频）</option>
+                  <option v-if="hasCable" value="cable">🎧 VB-Audio CABLE（音频隔离模式）</option>
                 </select>
               </div>
               <div class="stt-row">
@@ -97,6 +98,15 @@
                 千问本地 Qwen3-ASR-Flash 识别准确率最高，推荐使用
                 <span v-if="settingsStore.tempSettings.sttService === 'qwen_local'" class="stt-badge">已启用</span>
               </p>
+              <div v-if="audioDevice === 'cable'" class="cable-guidance">
+                <p class="cable-title">📋 VB-Audio CABLE 使用说明</p>
+                <ol class="cable-steps">
+                  <li>打开 Windows 声音设置 → 应用音量与设备首选项</li>
+                  <li>将目标应用（浏览器/会议软件）的输出设备设为 <strong>扬声器 (VB-Audio Virtual Cable)</strong></li>
+                  <li>该应用的音频将通过 CABLE 传输，不含麦克风串扰</li>
+                  <li>完成后记得将应用输出切回默认扬声器</li>
+                </ol>
+              </div>
             </div>
           </div>
         </div>
@@ -194,6 +204,20 @@ import Icon from './Icon.vue'
 
 const ui = useUIStore()
 const settingsStore = useSettingsStore()
+const hasCable = ref(false)
+
+// 检查 VB-Audio CABLE 设备是否可用
+async function checkCableAvailable() {
+  try {
+    const result = await window.go.main.App.AudioListDevices()
+    if (result) {
+      const devices = JSON.parse(result)
+      hasCable.value = devices.some(d => d.type === 'cable')
+    }
+  } catch (e) {
+    hasCable.value = false
+  }
+}
 
 // 音频设备选择 - 使用 settings store 中的 sttDevice
 const audioDevice = computed({
@@ -204,12 +228,20 @@ const audioDevice = computed({
 // 切换音频设备
 async function onAudioDeviceChange() {
   try {
-    const deviceName = audioDevice.value === 'stereo_mix' ? '立体声混音' : '麦克风'
+    const nameMap = {
+      'mic': '麦克风',
+      'stereo_mix': '立体声混音',
+      'cable': 'VB-Audio Virtual Cable',
+    }
+    const deviceName = nameMap[audioDevice.value] || '麦克风'
     await window.go.main.App.SetSTTDeviceByName(deviceName)
   } catch (e) {
     console.error('切换音频设备失败:', e)
   }
 }
+
+// 组件挂载时检查 CABLE 可用性
+checkCableAvailable()
 
 const screenshotConfig = computed({
   get: () => ({
@@ -671,5 +703,31 @@ input[type="range"]::-webkit-slider-thumb {
   border: 2px solid var(--surface-elevated);
   box-shadow: var(--shadow-sm);
   cursor: pointer;
+}
+
+/* ── CABLE 使用引导 ── */
+.cable-guidance {
+  margin-top: var(--sp-3);
+  padding: var(--sp-3);
+  background: var(--surface-card);
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-lg);
+}
+.cable-title {
+  font-size: var(--text-xs);
+  font-weight: 700;
+  color: var(--accent);
+  margin-bottom: var(--sp-2);
+}
+.cable-steps {
+  margin: 0;
+  padding-left: var(--sp-5);
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  line-height: 1.8;
+}
+.cable-steps li strong {
+  color: var(--text-primary);
+  font-weight: 600;
 }
 </style>

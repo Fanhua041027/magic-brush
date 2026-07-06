@@ -4,6 +4,18 @@ import {domain} from '../models';
 import {screen} from '../models';
 import {config} from '../models';
 
+export function AudioCapture(arg1:number,arg2:number):Promise<string>;
+
+export function AudioCaptureWithEnhancement(arg1:number,arg2:number):Promise<string>;
+
+export function AudioGetBestDevice():Promise<string>;
+
+export function AudioIsAvailable():Promise<string>;
+
+export function AudioListDevices():Promise<string>;
+
+export function AudioTranscribe(arg1:string):Promise<string>;
+
 export function CancelRunningTask():Promise<boolean>;
 
 export function ChatWithDeepSeek(arg1:string):Promise<string>;
@@ -29,6 +41,8 @@ export function ClearScreenshots():Promise<void>;
 export function CopyCode():Promise<void>;
 
 export function EmitEvent(arg1:string,arg2:Array<any>):Promise<void>;
+
+export function GenerateInterviewAnswer(arg1:string):Promise<string>;
 
 export function GetDomainCategories():Promise<Array<domain.Category>>;
 

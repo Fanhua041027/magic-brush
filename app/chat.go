@@ -9,7 +9,7 @@ import (
 	"github.com/openai/openai-go/option"
 )
 
-// DeepSeek API 配置
+// DeepSeek API 配置（F7 面试助手强制使用）
 const (
 	deepseekBaseURL = "https://api.deepseek.com"
 	deepseekModel   = "deepseek-chat"
@@ -22,10 +22,10 @@ const interviewPersonaPrompt = `你是一位 AI 面试辅助助手。你的核�
 姓名：朱晋辉
 年龄：21岁
 学校：吕梁学院 — 数据科学与大数据技术专业（2027届）
-求职意向：AI Agent 开发工程师（实习生）
-核心能力：AI Agent 开发（LangChain/LangGraph）、大模型应用（RAG、Prompt工程、模型微调）、Python/Java 全栈、K8s/Docker 部署
-主修课程：人工智能、机器学习、深度学习、大模型(LLM)应用开发、数据结构与算法、大数据架构(Spark/Flink/Hadoop)
-荣誉：国家级竞赛奖项5+项、软件著作权3项、华为鸿蒙校园大使
+求职意向：AI应用开发工程师（实习生）
+核心能力：AI Agent 开发与编排（LangChain/LangGraph）、大模型应用（RAG、Prompt工程、模型微调）、Python/Java 全栈、K8s/Docker 部署
+主修课程：人工智能、机器学习、深度学习、大模型(LLM)应用开发、LangChain/LangGraph框架、数据结构与算法
+荣誉：省级以上竞赛奖项13+项、软件著作权4项、华为鸿蒙校园大使
 </身份背景>
 
 <回答风格>
@@ -39,26 +39,23 @@ const interviewPersonaPrompt = `你是一位 AI 面试辅助助手。你的核�
 </回答风格>
 
 <项目经验>
-1. 金融情绪感知与决策 AI Agent（负责人 | 2025.07-2025.10）
-   基于 LangGraph 设计「分析-反思-决策」三阶段状态机，引入自洽性机制进行多角色投票仲裁
-   使用 INT8 量化将模型显存从 14GB 降至 7.5GB，推理延迟从 1.2s 优化至 0.6s
-   编写 Dockerfile 与 K8s 配置，利用 HPA 实现弹性扩容，在 50 QPS 下保持系统稳定
-   在消费级显卡上实现实时分析，保持 98% 原始精度
+1. 金融智能决策与投研多智能体系统（币星人）（负责人 | 2025.06-2025.12）
+   基于 LangGraph 设计「总指挥+专家团」协作模式与 FSM 状态机，MoA 架构使研报生成效率提升 5 倍
+   AWQ-4bit 量化将显存从 64GB 压缩至单卡可承载范围，单句推理延迟优化至 0.7s，精度损失<2%
+   K8s 弹性伸缩确保单副本 50 QPS 无请求堆积，GPT-4o-mini 异步兜底保障服务 99.9% 可用性
+   构建 RAG+代码解释器+知识图谱三元幻觉抑制引擎，多源冲突仲裁准确率达 92%
+   Playwright 采集 4 个财经网站，NLP 提取实体关系，日均处理 5000 条原始文本
 
-2. 金融资讯智能采集与推理 Agent 系统（多智能体架构师 | 2025.09-2025.12）
-   基于 MoA 架构设计「总指挥+专家团」协作模式，研报生成效率提升 5 倍
-   研发 RAG 幻觉抑制引擎，结合自纠错机制验证财务指标，多源冲突仲裁准确率达 92%
-   利用 NLP 提取实体关系，搭建动态更新的金融知识图谱底座
-
-3. 面向工业场景的 AI Agent 编排底座与事件驱动原型（AI全栈 | 2026.02-2026.04）
-   基于 Python Dataclass 定义标准化事件 Schema，实现三大职能模块解耦
-   依托 FastAPI Background Tasks 搭建异步队列，保障数据一致性达 100%
-   基于 Streamlit 搭建全链路可视化监控面板，预留自然语言交互接口
+2. 工业级ERP系统Agent调度中间件（AI全栈 | 2026.02-2026.05）
+   采用 FastAPI 构建独立 Agent 网关，定义基于 Pydantic 的强类型请求/响应 Schema 对接 Java 后端
+   实现内存队列重试+超时熔断机制，构造 20+ 异常用例验证系统降级表现，无脏数据产生
+   Agent 指令执行成功率从 72% 提升至 96%，在采购审批、库存预警、工单派发场景完成端到端集成
+   开发 Streamlit 可视化控制台及 NLP-to-API 映射中间件，简单指令解析准确率达 90%
 </项目经验>
 
 <实习经历>
-- 临汾市商巢科技 — AI Agent 算法实习生（2025.07-2025.12）：基于 LangGraph 构建 TradingAgents 系统，搭建 GraphRAG 知识图谱，构建日均处理 2 万+条资讯的分布式管道
-- 上海言楚实业 — 大模型应用开发工程师（2026.02-2026.05）：基于 FastAPI 构建高可用后端，研发 RAG 系统与自纠错机制，主导 AI 与企业 ERP/CRM 系统集成
+- 临汾市商巢科技 — 后端开发实习生（2025.06-2025.12）：搭建 GraphRAG 与金融知识图谱，关键资讯筛选准确率从 78% 提升至 92%；基于 LangGraph 构建 TradingAgents 多智能体系统；运维日均 2 万+条资讯的分布式采集管道
+- 上海言楚实业 — AI全栈开发实习生（2026.02-2026.06）：基于 Python/FastAPI 构建高可用后端，设计多 Agent 协同架构与标准化通信协议；落地 Saga 模式补偿机制与深度容错策略，实现异常场景自动回滚与数据最终一致性
 </实习经历>`
 
 // 面试助手行为规则
@@ -91,7 +88,7 @@ func (a *App) getAPIKey() string {
 	return ""
 }
 
-// ChatWithDeepSeek 使用 DeepSeek API 进行对话（非流式）
+// ChatWithDeepSeek 使用 DeepSeek API 进行对话（非流式）—— 仅 F7 使用
 func (a *App) ChatWithDeepSeek(message string) string {
 	apiKey := a.getAPIKey()
 	if apiKey == "" {
@@ -141,7 +138,7 @@ func (a *App) ChatWithDeepSeek(message string) string {
 	})
 
 	if err != nil {
-		logger.Printf("[Chat] DeepSeek API error: %v", err)
+		logger.Printf("[Chat] API error: %v", err)
 		return fmt.Sprintf("抱歉，请求失败: %v", err)
 	}
 
@@ -152,9 +149,13 @@ func (a *App) ChatWithDeepSeek(message string) string {
 	return "抱歉，没有收到回复"
 }
 
-// ChatWithDeepSeekStream 使用 DeepSeek API 进行对话（流式输出）
+// ChatWithDeepSeekStream 使用 DeepSeek API 进行对话（流式输出）—— 仅 F7 使用
 func (a *App) ChatWithDeepSeekStream(message string) {
 	apiKey := a.getAPIKey()
+	if apiKey == "" {
+		a.EmitEvent("chat-stream-error", "请先在设置中配置 API Key")
+		return
+	}
 
 	client := openai.NewClient(
 		option.WithAPIKey(apiKey),
@@ -219,9 +220,13 @@ func (a *App) ChatWithDeepSeekStream(message string) {
 	a.EmitEvent("chat-stream-done")
 }
 
-// ChatWithDeepSeekStreamWithContext 使用 DeepSeek API 进行带上下文的对话（流式输出）
+// ChatWithDeepSeekStreamWithContext 使用 DeepSeek API 进行带上下文的对话（流式输出）—— 仅 F7 使用
 func (a *App) ChatWithDeepSeekStreamWithContext(messages []map[string]string) {
 	apiKey := a.getAPIKey()
+	if apiKey == "" {
+		a.EmitEvent("chat-stream-error", "请先在设置中配置 API Key")
+		return
+	}
 
 	client := openai.NewClient(
 		option.WithAPIKey(apiKey),
@@ -271,13 +276,23 @@ func (a *App) ChatWithDeepSeekStreamWithContext(messages []map[string]string) {
 	a.EmitEvent("chat-stream-done")
 }
 
-// ChatWithScreenshot 使用 DeepSeek API 进行截图追问对话（流式输出）
+// ChatWithScreenshot 使用用户配置的 API 进行截图追问对话（流式输出）—— F8 追问使用
 func (a *App) ChatWithScreenshot(message string, screenshotBase64 string, previousContext string) {
-	apiKey := a.getAPIKey()
+	// 使用用户配置的 API Key 和模型（与 F8 截图相同）
+	cfg := a.configManager.Get()
+	apiKey := cfg.APIKey
+	if apiKey == "" {
+		apiKey = a.getAPIKey()
+	}
+
+	baseURL := cfg.BaseURL
+	if baseURL == "" {
+		baseURL = "https://api.openai.com/v1"
+	}
 
 	client := openai.NewClient(
 		option.WithAPIKey(apiKey),
-		option.WithBaseURL(deepseekBaseURL),
+		option.WithBaseURL(baseURL),
 	)
 
 	ctx := context.Background()
@@ -296,7 +311,6 @@ func (a *App) ChatWithScreenshot(message string, screenshotBase64 string, previo
 
 	// 获取简历内容
 	resumeContext := ""
-	cfg := a.configManager.Get()
 	if cfg.ResumeContent != "" {
 		resumeContext = "\n\n【用户简历】\n" + cfg.ResumeContent
 	}
@@ -316,16 +330,21 @@ func (a *App) ChatWithScreenshot(message string, screenshotBase64 string, previo
 		openai.SystemMessage(systemPrompt),
 	}
 
-	// DeepSeek 不支持图片，只发送文本
-	// 如果有截图，在消息中说明
+	// 如果有多模态模型则传图，否则文本说明
 	userMessage := message
 	if screenshotBase64 != "" {
 		userMessage = message + "\n\n[注：用户已截图，截图内容已在之前的对话中提供]"
 	}
 	messages = append(messages, openai.UserMessage(userMessage))
 
+	// 使用用户配置的模型
+	modelToUse := cfg.Model
+	if modelToUse == "" {
+		modelToUse = deepseekModel
+	}
+
 	stream := client.Chat.Completions.NewStreaming(ctx, openai.ChatCompletionNewParams{
-		Model:    deepseekModel,
+		Model:    modelToUse,
 		Messages: messages,
 	})
 

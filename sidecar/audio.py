@@ -54,6 +54,9 @@ def list_input_devices() -> list[dict[str, Any]]:
                        ["立体声混音", "stereo mix", "what u hear",
                         "wave out", "loopback", "音频输出"]):
                     device_type = "stereo_mix"
+                elif any(kw in name_lower for kw in
+                         ["cable output", "vb-audio virtual cable", "vb-audio point"]):
+                    device_type = "cable"
                 elif any(kw in name_lower for kw in ["麦克风", "microphone", "mic"]):
                     device_type = "mic"
 
@@ -140,7 +143,30 @@ def get_device_config() -> tuple[Optional[int], int]:
 
 
 def _auto_select_device() -> Optional[int]:
-    """自动选择最佳输入设备"""
+    """自动选择最佳输入设备：立体声混音 > CABLE > 默认 > 第一个可用"""
+    try:
+        all_devices = sd.query_devices()
+    except Exception:
+        return None
+
+    # 优先立体声混音（捕获系统内部音频）
+    for i, dev in enumerate(all_devices):
+        name = str(_get_device_attr(dev, "name") or "").lower()
+        max_input = _get_device_attr(dev, "max_input_channels")
+        if max_input and max_input > 0:
+            if any(kw in name for kw in ["立体声混音", "stereo mix", "what u hear",
+                                          "wave out", "loopback", "音频输出"]):
+                return i
+
+    # 其次 VB-Audio CABLE（音频隔离）
+    for i, dev in enumerate(all_devices):
+        name = str(_get_device_attr(dev, "name") or "").lower()
+        max_input = _get_device_attr(dev, "max_input_channels")
+        if max_input and max_input > 0:
+            if any(kw in name for kw in ["cable output", "vb-audio"]):
+                return i
+
+    # 其次默认输入
     try:
         default_id = sd.default.device[0]
         if default_id is not None:
@@ -148,8 +174,8 @@ def _auto_select_device() -> Optional[int]:
     except Exception:
         pass
 
-    # 找第一个输入设备
-    for i, dev in enumerate(sd.query_devices()):
+    # 最后第一个输入设备
+    for i, dev in enumerate(all_devices):
         max_input = _get_device_attr(dev, "max_input_channels")
         if max_input and max_input > 0:
             return i
@@ -202,7 +228,7 @@ def _normalize_audio(audio: np.ndarray, target_rms: float = 0.05) -> np.ndarray:
 # ── 录音器 ─────────────────────────────────────────────
 
 class AudioRecorder:
-    """线程安全的录音器"""
+    """线程安全的录音器（回调模式，兼容 WDM-KS）"""
 
     def __init__(self):
         self._frames: deque = deque()
@@ -213,10 +239,51 @@ class AudioRecorder:
         self._streaming_interval = 0.5
         self._last_streaming_time = 0.0
         self._stream = None
-        self._read_thread: Optional[threading.Thread] = None
-        self._stop_event = threading.Event()
+        self._frame_counter = 0
+        self._stream_active = False
 
         self._open_stream()
+
+    def _audio_callback(self, indata, frames, time_info, status):
+        """PortAudio 回调 — 在音频线程中调用，必须轻量"""
+        if status:
+            print(f"[Audio] Callback status: {status}", flush=True)
+
+        if indata is None or indata.size == 0:
+            return
+
+        # 取单声道
+        audio = indata[:, 0].copy() if indata.ndim > 1 else indata.copy()
+
+        # RMS 电平（VU 表）
+        try:
+            rms = float(np.sqrt(np.mean(audio ** 2)))
+            if np.isnan(rms) or np.isinf(rms):
+                rms = 0.0
+        except Exception:
+            rms = 0.0
+        if _audio_level_callback:
+            _audio_level_callback(rms)
+
+        # 录音帧存储
+        with self._lock:
+            if self._recording:
+                self._frames.append(audio)
+                self._frame_counter += 1
+
+                # 流式回调（异步）
+                now = time.time()
+                if (self._streaming_callback and
+                        now - self._last_streaming_time >= self._streaming_interval):
+                    self._last_streaming_time = now
+                    recent = list(self._frames)[-30:]
+                    if recent:
+                        chunk = np.concatenate(recent, axis=0).flatten()
+                        threading.Thread(
+                            target=self._streaming_callback,
+                            args=(chunk,),
+                            daemon=True,
+                        ).start()
 
     def _open_stream(self):
         """打开音频流（带重试）"""
@@ -225,7 +292,7 @@ class AudioRecorder:
             try:
                 print(f"[Audio] Opening stream: device={_DEVICE_ID}, rate={self._sample_rate} (attempt {attempt + 1})", flush=True)
                 blocksize = int(self._sample_rate * BLOCKSIZE_MS / 1000)
-                blocksize = max(blocksize, 512)  # 最小 512
+                blocksize = max(blocksize, 512)
 
                 self._stream = sd.InputStream(
                     samplerate=self._sample_rate,
@@ -233,91 +300,19 @@ class AudioRecorder:
                     dtype='float32',
                     device=_DEVICE_ID,
                     blocksize=blocksize,
+                    callback=self._audio_callback,
                 )
                 self._stream.start()
-                print(f"[Audio] Stream opened (blocksize={blocksize}), device={_DEVICE_ID}", flush=True)
-
-                # 启动读取线程
-                self._stop_event.clear()
-                self._read_thread = threading.Thread(target=self._read_audio, daemon=True)
-                self._read_thread.start()
+                self._stream_active = True
+                print(f"[Audio] Stream opened (callback mode, blocksize={blocksize}), device={_DEVICE_ID}", flush=True)
                 return
 
             except Exception as e:
                 print(f"[Audio] Stream open failed (attempt {attempt + 1}): {e}", flush=True)
                 time.sleep(0.5)
+                self._stream_active = False
 
         print(f"[Audio] Failed to open stream after {max_retries} attempts", flush=True)
-
-    def _read_audio(self):
-        """读取线程 — 持续从音频流读取数据"""
-        read_size = int(self._sample_rate * BLOCKSIZE_MS / 1000)
-        read_size = max(read_size, 512)
-
-        print(f"[Audio] Read thread started (read_size={read_size})", flush=True)
-
-        frame_counter = 0
-        while not self._stop_event.is_set():
-            try:
-                if self._stream is None:
-                    time.sleep(0.1)
-                    continue
-
-                data, overflowed = self._stream.read(read_size)
-                if overflowed:
-                    print("[Audio] Buffer overflow", flush=True)
-
-                if data is None or data.size == 0:
-                    time.sleep(0.01)
-                    continue
-
-                if data.ndim > 1:
-                    audio = data[:, 0].copy()
-                else:
-                    audio = data.copy()
-
-                try:
-                    rms_val = np.sqrt(np.mean(audio ** 2))
-                    if np.isnan(rms_val) or np.isinf(rms_val):
-                        rms = 0.0
-                    else:
-                        rms = float(rms_val)
-                except Exception:
-                    rms = 0.0
-                rms = float(np.sqrt(np.mean(audio ** 2)))
-
-                # 更新 VU 表电平（无论是否录音都更新）
-                global _audio_level_callback
-                if _audio_level_callback:
-                    _audio_level_callback(rms)
-
-                with self._lock:
-                    if self._recording:
-                        self._frames.append(audio)
-                        frame_counter += 1
-
-                        # 流式回调
-                        now = time.time()
-                        if (self._streaming_callback and
-                                now - self._last_streaming_time >= self._streaming_interval):
-                            self._last_streaming_time = now
-                            # 收集最近帧
-                            recent_frames = list(self._frames)[-30:]  # 最多1.5秒
-                            if recent_frames:
-                                chunk = np.concatenate(recent_frames, axis=0).flatten()
-                                threading.Thread(
-                                    target=self._streaming_callback,
-                                    args=(chunk,),
-                                    daemon=True,
-                                ).start()
-
-            except Exception as e:
-                if not self._stop_event.is_set():
-                    print(f"[Audio] Read error: {e}", flush=True)
-                time.sleep(0.01)
-                break
-
-        print(f"[Audio] Read thread stopped (processed {frame_counter} frames)", flush=True)
 
     @property
     def device_id(self) -> Optional[int]:
@@ -331,10 +326,6 @@ class AudioRecorder:
         """重新打开音频流（设备切换时）"""
         print(f"[Audio] Reopening stream for device {device_id}", flush=True)
 
-        self._stop_event.set()
-        if self._read_thread:
-            self._read_thread.join(timeout=2.0)
-
         if self._stream:
             try:
                 self._stream.stop()
@@ -343,13 +334,13 @@ class AudioRecorder:
                 pass
             self._stream = None
 
-        with self._device_lock:
+        with _device_lock:
             if device_id is not None:
                 _DEVICE_ID = device_id
             self._sample_rate = _SAMPLE_RATE
 
         self._open_stream()
-        return self._stream is not None
+        return self._stream is not None and self._stream_active
 
     def set_streaming_callback(self, callback: Optional[Callable]):
         """设置流式回调"""
@@ -424,10 +415,7 @@ class AudioRecorder:
     def close(self):
         """关闭录音器"""
         self._recording = False
-        self._stop_event.set()
-
-        if self._read_thread:
-            self._read_thread.join(timeout=2.0)
+        self._stream_active = False
 
         if self._stream:
             try:
@@ -437,4 +425,4 @@ class AudioRecorder:
                 pass
             self._stream = None
 
-        print("[Audio] Recorder closed", flush=True)
+        print(f"[Audio] Recorder closed (processed {self._frame_counter} frames)", flush=True)

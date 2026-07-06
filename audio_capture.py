@@ -61,10 +61,13 @@ def list_devices() -> list[dict]:
 
             device_type = "mic"
             stereo_mix_kw = ["立体声混音", "stereo mix", "what u hear", "wave out", "混合输出", "loopback", "音频输出", "speaker"]
+            cable_kw = ["cable output", "vb-audio virtual cable", "vb-audio point"]
             mic_kw = ["麦克风", "microphone", "mic"]
             line_in_kw = ["line in", "线路输入", "辅助"]
             if any(kw in name_lower for kw in stereo_mix_kw):
                 device_type = "stereo_mix"
+            elif any(kw in name_lower for kw in cable_kw):
+                device_type = "cable"
             elif any(kw in name_lower for kw in mic_kw):
                 device_type = "mic"
             elif any(kw in name_lower for kw in line_in_kw):
@@ -91,8 +94,9 @@ def find_best_input_device() -> tuple[Optional[int], Optional[str]]:
     """
     自动选择最佳输入设备：
     1. 优先立体声混音（捕获系统内部音频）
-    2. 其次默认输入设备
-    3. 最后第一个可用设备
+    2. 其次 VB-Audio CABLE（纯系统音频，无麦克风串扰）
+    3. 其次默认输入设备
+    4. 最后第一个可用设备
     """
     devices = list_devices()
     if not devices:
@@ -101,6 +105,11 @@ def find_best_input_device() -> tuple[Optional[int], Optional[str]]:
     # 优先查找立体声混音设备
     for d in devices:
         if d['type'] == 'stereo_mix':
+            return d['index'], d['name']
+
+    # 其次 VB-Audio CABLE（音频隔离模式）
+    for d in devices:
+        if d['type'] == 'cable':
             return d['index'], d['name']
 
     # 其次默认设备
