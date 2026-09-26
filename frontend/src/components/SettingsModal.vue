@@ -119,7 +119,7 @@
                 <button
                   class="btn-icon"
                   @click="settingsStore.refreshModels"
-                  :disabled="ui.isLoadingModels || !settingsStore.tempSettings.apiKey"
+                  :disabled="ui.isLoadingModels || (!settingsStore.tempSettings.apiKey && !settingsStore.settings.apiKeyConfigured)"
                   title="刷新模型列表"
                 >
                   <svg class="action-icon" :class="{ spin: ui.isLoadingModels }" viewBox="0 0 16 16" fill="none">
@@ -152,7 +152,7 @@
               <span class="cs-text">{{ ui.connectionStatus.message }}</span>
             </div>
 
-            <p v-if="!settingsStore.tempSettings.apiKey" class="hint-text warning-hint">请先填写 API Key</p>
+            <p v-if="!settingsStore.tempSettings.apiKey && !settingsStore.settings.apiKeyConfigured" class="hint-text warning-hint">请先填写 API Key</p>
           </div>
 
           <div class="form-group domain-group">
@@ -178,7 +178,10 @@
 
         <div v-show="ui.activeTab === 'api'" class="tab-pane api-tab-pane">
           <ProviderSelect
-            v-model:apiKey="settingsStore.tempSettings.apiKey"
+            :apiKey="settingsStore.tempSettings.apiKey"
+            :apiKeyConfigured="settingsStore.settings.apiKeyConfigured"
+            @update:apiKey="settingsStore.setAPIKey"
+            @clear-api-key="settingsStore.clearAPIKey"
             v-model:baseURL="settingsStore.tempSettings.baseURL"
           />
         </div>

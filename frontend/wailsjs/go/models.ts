@@ -1,3 +1,56 @@
+export namespace auth {
+	
+	export class User {
+	    id: string;
+	    username: string;
+	    passwordHash: string;
+	    role: string;
+	    enabled: boolean;
+	    // Go type: time
+	    createdAt: any;
+	    // Go type: time
+	    lastLoginAt?: any;
+	    totalSeconds: number;
+	    mustChangePassword?: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new User(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.username = source["username"];
+	        this.passwordHash = source["passwordHash"];
+	        this.role = source["role"];
+	        this.enabled = source["enabled"];
+	        this.createdAt = this.convertValues(source["createdAt"], null);
+	        this.lastLoginAt = this.convertValues(source["lastLoginAt"], null);
+	        this.totalSeconds = source["totalSeconds"];
+	        this.mustChangePassword = source["mustChangePassword"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+
+}
+
 export namespace config {
 	
 	export class Config {
@@ -29,6 +82,11 @@ export namespace config {
 	    sttLanguage?: string;
 	    sttSensitivity?: number;
 	    sttService?: string;
+	    answerLength?: string;
+	    answerStyle?: string;
+	    answerStructure?: string;
+	    answerDuration?: string;
+	    includeTechnicalDetails?: boolean;
 	    kbPath?: string;
 	
 	    static createFrom(source: any = {}) {
@@ -65,6 +123,11 @@ export namespace config {
 	        this.sttLanguage = source["sttLanguage"];
 	        this.sttSensitivity = source["sttSensitivity"];
 	        this.sttService = source["sttService"];
+	        this.answerLength = source["answerLength"];
+	        this.answerStyle = source["answerStyle"];
+	        this.answerStructure = source["answerStructure"];
+	        this.answerDuration = source["answerDuration"];
+	        this.includeTechnicalDetails = source["includeTechnicalDetails"];
 	        this.kbPath = source["kbPath"];
 	    }
 	

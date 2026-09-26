@@ -145,14 +145,16 @@
                       <div class="demo-field">
                         <label class="demo-label">🤖 AI 回答语言</label>
                         <div class="language-chips">
-                          <span
+                          <button
+                            v-for="option in answerLanguageOptions"
+                            :key="option.value"
+                            type="button"
                             class="chip"
-                            :class="{ active: settingsStore.tempSettings.sttLanguage === 'zh' || settingsStore.tempSettings.sttLanguage === 'auto' }"
-                          >中文</span>
-                          <span class="chip">英文</span>
-                          <span class="chip">中英混合</span>
+                            :class="{ active: answerLanguage === option.value }"
+                            @click="answerLanguage = option.value"
+                          >{{ option.label }}</button>
                         </div>
-                        <p class="demo-hint">AI 会根据你的问题语言自动匹配回答语言。</p>
+                        <p class="demo-hint">{{ answerLanguageHint }}</p>
                       </div>
                       <transition name="quick-fade">
                         <div v-if="langSaved" class="demo-toast">
@@ -591,6 +593,17 @@ const phase2Steps = computed(() => tutorial.STEPS.filter(s => s.phase === 1))
 
 // ── Step 0: 语言设置 ──────────────────────────────────────
 const audioInputType = ref('mic')
+const answerLanguage = ref('mixed')
+const answerLanguageOptions = [
+  { value: 'zh', label: '中文' },
+  { value: 'en', label: '英文' },
+  { value: 'mixed', label: '中英混合' },
+]
+const answerLanguageHint = computed(() => ({
+  zh: '使用中文回答。',
+  en: 'Use English for answers.',
+  mixed: '整体使用中文，技术术语和必要表达保留自然英文。',
+}[answerLanguage.value]))
 const langSaved = ref(false)
 
 // ── Step 1: 简历 + JD ──────────────────────────────────────

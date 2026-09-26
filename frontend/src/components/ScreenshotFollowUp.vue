@@ -100,8 +100,8 @@
 import { ref, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import Icon from './Icon.vue'
 import { renderMarkdownWithLatex } from '../utils/markdown-latex'
-import { ChatWithDeepSeek, ChatWithDeepSeekStream, ChatWithScreenshotSync, TriggerFollowUpScreenshot, StopThinking, SetFollowUpActive } from '../../wailsjs/go/app/App'
-import { EventsOn, EventsOff } from '../../wailsjs/runtime/runtime'
+import { CancelRequest, ChatWithDeepSeek, ChatWithDeepSeekStream, ChatWithScreenshotSync, TriggerFollowUpScreenshot, SetFollowUpActive } from '../../wailsjs/go/app/App'
+import { onMany } from '../services/events'
 
 const isVisible = ref(false)
 const isLoading = ref(false)
@@ -114,6 +114,16 @@ const inputText = ref('')
 const messagesRef = ref(null)
 const inputRef = ref(null)
 const currentStreamContent = ref('')
+let activeRequestId = null
+let cleanupEvents = null
+let sessionGeneration = 0
+
+function createRequestId() {
+  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID()
+  const bytes = new Uint8Array(16)
+  globalThis.crypto.getRandomValues(bytes)
+  return Array.from(bytes, value => value.toString(16).padStart(2, '0')).join('')
+}
 
 function renderMarkdown(text) {
   if (!text) return ''
@@ -121,7 +131,8 @@ function renderMarkdown(text) {
 }
 
 function show(screenshotData, answer, context) {
-  // DEVLOG: console.log('[FollowUp] show() called', { hasScreenshot: !!screenshotData, hasAnswer: !!answer })
+  sessionGeneration++
+  const generation = sessionGeneration
   screenshot.value = screenshotData || ''
   previousAnswer.value = answer || ''
   previousContext.value = context || ''
@@ -129,32 +140,38 @@ function show(screenshotData, answer, context) {
   isVisible.value = true
   SetFollowUpActive(true)
   nextTick(() => {
-    inputRef.value?.focus()
+    if (generation === sessionGeneration && isVisible.value) inputRef.value?.focus()
   })
 }
 
 function close() {
+  sessionGeneration++
+  const requestId = activeRequestId
+  activeRequestId = null
+  if (requestId) void CancelRequest(requestId)
+  isLoading.value = false
+  currentStreamContent.value = ''
   isVisible.value = false
   messages.value = []
   SetFollowUpActive(false)
 }
 
 async function takeScreenshot() {
+  const generation = sessionGeneration
   try {
     const result = await TriggerFollowUpScreenshot()
+    if (generation !== sessionGeneration || !isVisible.value) return
     if (result) {
       screenshot.value = result
-      // DEVLOG: console.log('[FollowUp] Screenshot taken, auto-sending...')
-      // 截图后自动发送给模型
-      await sendScreenshotToModel(result)
+      await sendScreenshotToModel(result, generation)
     }
   } catch (error) {
-    console.error('Screenshot error:', error)
+    if (generation === sessionGeneration) console.error('Screenshot error:', error)
   }
 }
 
-async function sendScreenshotToModel(screenshotBase64) {
-  if (isLoading.value) return
+async function sendScreenshotToModel(screenshotBase64, generation = sessionGeneration) {
+  if (isLoading.value || generation !== sessionGeneration || !isVisible.value) return
 
   const userMsg = '请根据截图内容回答'
   messages.value.push({
@@ -168,6 +185,7 @@ async function sendScreenshotToModel(screenshotBase64) {
   try {
     // 使用 ChatWithScreenshotSync 发送图片给模型（非流式，支持图片）
     const result = await ChatWithScreenshotSync(userMsg, screenshotBase64, previousContext.value)
+    if (generation !== sessionGeneration || !isVisible.value) return
     // DEVLOG: console.log('[FollowUp] Got result:', result ? result.slice(0, 100) : 'null')
     if (result) {
       messages.value.push({
@@ -193,8 +211,11 @@ async function sendScreenshotToModel(screenshotBase64) {
 }
 
 async function stopThinking() {
+  const requestId = activeRequestId
+  if (!requestId) return
+  activeRequestId = null
   try {
-    await StopThinking()
+    await CancelRequest(requestId)
     isLoading.value = false
     // 如果有正在流式输出的内容，标记为完成
     const lastMsg = messages.value[messages.value.length - 1]
@@ -208,8 +229,9 @@ async function stopThinking() {
 }
 
 async function sendMessage() {
+  const generation = sessionGeneration
   const text = inputText.value.trim()
-  if (!text || isLoading.value) return
+  if (!text || isLoading.value || !isVisible.value) return
 
   inputText.value = ''
   messages.value.push({
@@ -229,51 +251,28 @@ async function sendMessage() {
     }
     // DEVLOG: console.log('[FollowUp] Calling ChatWithDeepSeekStream...')
 
-    // 使用流式输出
-    await ChatWithDeepSeekStream(fullMessage)
-
-    // 流式输出完成后，内容已经通过事件处理
-    // 如果没有收到流式事件，使用普通模式作为备选
-    if (currentStreamContent.value === '') {
-      // DEVLOG: console.log('[FollowUp] No stream events received, falling back to sync mode')
-      const result = await ChatWithDeepSeek(fullMessage)
-      if (result) {
-        messages.value.push({
-          role: 'assistant',
-          content: result,
-        })
-        // 更新上下文以便后续追问
-        previousContext.value = result
-      } else {
-        messages.value.push({
-          role: 'assistant',
-          content: '模型未返回内容',
-        })
-      }
-    } else {
-      // 流式输出完成，更新上下文
-      const lastMsg = messages.value[messages.value.length - 1]
-      if (lastMsg && lastMsg.role === 'assistant') {
-        previousContext.value = lastMsg.content
-      }
-    }
+    const requestId = createRequestId()
+    activeRequestId = requestId
+    await ChatWithDeepSeekStream(requestId, fullMessage)
   } catch (error) {
+    if (generation !== sessionGeneration || !isVisible.value) return
     console.error('[FollowUp] Error:', error)
     messages.value.push({
       role: 'assistant',
       content: `抱歉，发生了错误: ${error.message || '未知错误'}`,
     })
   } finally {
-    // DEVLOG: console.log('[FollowUp] Done, setting isLoading to false')
-    isLoading.value = false
-    currentStreamContent.value = ''
+    if (generation === sessionGeneration) {
+      isLoading.value = false
+      currentStreamContent.value = ''
+    }
   }
 }
 
-function handleStreamChunk(chunk) {
-  if (!isLoading.value) return
+function handleStreamChunk(payload) {
+  if (!payload || payload.requestId !== activeRequestId || !isLoading.value) return
 
-  currentStreamContent.value += chunk
+  currentStreamContent.value += payload.chunk
 
   // 更新或添加助手消息
   const lastMsg = messages.value[messages.value.length - 1]
@@ -295,16 +294,21 @@ function handleStreamChunk(chunk) {
   })
 }
 
-function handleStreamDone() {
+function handleStreamDone(payload) {
+  if (!payload || payload.requestId !== activeRequestId) return
   const lastMsg = messages.value[messages.value.length - 1]
   if (lastMsg && lastMsg._streaming) {
     delete lastMsg._streaming
+    previousContext.value = lastMsg.content
   }
+  activeRequestId = null
   isLoading.value = false
   currentStreamContent.value = ''
 }
 
-function handleStreamError(error) {
+function handleStreamError(payload) {
+  if (!payload || payload.requestId !== activeRequestId) return
+  const error = payload.error || '未知错误'
   console.error('Stream error:', error)
   const lastMsg = messages.value[messages.value.length - 1]
   if (lastMsg && lastMsg._streaming) {
@@ -316,6 +320,7 @@ function handleStreamError(error) {
       content: `抱歉，发生了错误: ${error}`,
     })
   }
+  activeRequestId = null
   isLoading.value = false
   currentStreamContent.value = ''
 }
@@ -335,55 +340,48 @@ function handleKeydown(e) {
 }
 
 onMounted(() => {
-  // 监听流式输出事件（使用 Wails runtime EventsOn）
-  EventsOn('chat-stream-chunk', (chunk) => {
-    if (!isVisible.value) return
-    handleStreamChunk(chunk)
-  })
-  EventsOn('chat-stream-done', () => {
-    if (!isVisible.value) return
-    handleStreamDone()
-  })
-  EventsOn('chat-stream-error', (error) => {
-    if (!isVisible.value) return
-    handleStreamError(error)
-  })
-
-  EventsOn('stt-recording-started', () => {
-    isRecording.value = true
-  })
-  EventsOn('stt-recording-stopped', () => {
-    isRecording.value = false
-  })
-  EventsOn('stt-transcribed', (text) => {
-    if (isVisible.value && text) {
-      inputText.value = text
-      nextTick(() => {
-        sendMessage()
-      })
-    }
-  })
-  EventsOn('followup-screenshot-taken', (screenshotData) => {
-    if (isVisible.value && screenshotData) {
-      screenshot.value = screenshotData
-      messages.value.push({
-        role: 'user',
-        content: '[已更新截图]',
-      })
-    }
+  cleanupEvents = onMany({
+    'chat-stream-chunk': (payload) => {
+      if (isVisible.value) handleStreamChunk(payload)
+    },
+    'chat-stream-done': (payload) => {
+      if (isVisible.value) handleStreamDone(payload)
+    },
+    'chat-stream-error': (payload) => {
+      if (isVisible.value) handleStreamError(payload)
+    },
+    'stt-recording-started': () => {
+      isRecording.value = true
+    },
+    'stt-recording-stopped': () => {
+      isRecording.value = false
+    },
+    'stt-transcribed': (text) => {
+      if (isVisible.value && text) {
+        inputText.value = text
+        nextTick(() => sendMessage())
+      }
+    },
+    'followup-screenshot-taken': (screenshotData) => {
+      if (isVisible.value && screenshotData) {
+        screenshot.value = screenshotData
+        messages.value.push({ role: 'user', content: '[已更新截图]' })
+      }
+    },
   })
   document.addEventListener('keydown', handleKeydown)
 })
 
 onUnmounted(() => {
+  sessionGeneration++
+  const requestId = activeRequestId
+  activeRequestId = null
+  if (requestId) void CancelRequest(requestId)
+  void SetFollowUpActive(false)
+  isLoading.value = false
+  cleanupEvents?.()
+  cleanupEvents = null
   document.removeEventListener('keydown', handleKeydown)
-  EventsOff('chat-stream-chunk')
-  EventsOff('chat-stream-done')
-  EventsOff('chat-stream-error')
-  EventsOff('stt-recording-started')
-  EventsOff('stt-recording-stopped')
-  EventsOff('stt-transcribed')
-  EventsOff('followup-screenshot-taken')
 })
 
 defineExpose({ show, close })

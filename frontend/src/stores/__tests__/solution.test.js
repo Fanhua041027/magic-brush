@@ -18,6 +18,13 @@ vi.mock('../../services/api', () => ({
 }))
 
 describe('SolutionStore', () => {
+  const requestId = 'test-request'
+
+  function startStream(store, keepContext = false) {
+    store.beginRequest(requestId)
+    store.handleStreamStart({ requestId }, keepContext)
+  }
+
   beforeEach(() => {
     setActivePinia(createPinia())
   })
@@ -33,7 +40,7 @@ describe('SolutionStore', () => {
 
   it('handleStreamStart creates new history item', () => {
     const store = useSolutionStore()
-    store.handleStreamStart(false)
+    startStream(store)
     expect(store.history).toHaveLength(1)
     expect(store.history[0].rounds).toHaveLength(1)
     expect(store.activeHistoryIndex).toBe(0)
@@ -41,25 +48,25 @@ describe('SolutionStore', () => {
 
   it('handleStreamChunk updates response in round', () => {
     const store = useSolutionStore()
-    store.handleStreamStart(false)
-    store.handleStreamChunk('Hello')
+    startStream(store)
+    store.handleStreamChunk({ requestId, chunk: 'Hello' })
     const round = store.history[0].rounds[0]
     expect(round.aiResponse).toBe('Hello')
   })
 
   it('handleStreamChunk appends to response', () => {
     const store = useSolutionStore()
-    store.handleStreamStart(false)
-    store.handleStreamChunk('Hello')
-    store.handleStreamChunk(' World')
+    startStream(store)
+    store.handleStreamChunk({ requestId, chunk: 'Hello' })
+    store.handleStreamChunk({ requestId, chunk: ' World' })
     const round = store.history[0].rounds[0]
     expect(round.aiResponse).toBe('Hello World')
   })
 
   it('handleThinkingChunk sets thinking state', () => {
     const store = useSolutionStore()
-    store.handleStreamStart(false)
-    store.handleThinkingChunk('thinking step 1')
+    startStream(store)
+    store.handleThinkingChunk({ requestId, thinking: 'thinking step 1' })
     expect(store.isThinking).toBe(true)
     const round = store.history[0].rounds[0]
     expect(round.thinking).toBe('thinking step 1')
@@ -68,16 +75,16 @@ describe('SolutionStore', () => {
 
   it('handleThinkingChunk detects code generation', () => {
     const store = useSolutionStore()
-    store.handleStreamStart(false)
-    store.handleThinkingChunk('writing function main()')
+    startStream(store)
+    store.handleThinkingChunk({ requestId, thinking: 'writing function main()' })
     expect(store.thinkingStatusText).toBe('Generating Code...')
   })
 
   it('handleSolution ends loading and stores data', () => {
     const store = useSolutionStore()
     store.isLoading = true
-    store.handleStreamStart(false)
-    store.handleSolution('final answer')
+    startStream(store)
+    store.handleSolution({ requestId, content: 'final answer' })
     expect(store.isLoading).toBe(false)
     const round = store.history[0].rounds[0]
     expect(round.aiResponse).toBe('final answer')
@@ -85,7 +92,7 @@ describe('SolutionStore', () => {
 
   it('handleInlineError sets error on current round', () => {
     const store = useSolutionStore()
-    store.handleStreamStart(false)
+    startStream(store)
     const result = store.handleInlineError({ title: 'Error', desc: 'Something failed' })
     expect(result).toBe(true)
     expect(store.history[0].rounds[0].error.title).toBe('Error')
@@ -93,15 +100,24 @@ describe('SolutionStore', () => {
 
   it('clearInlineError removes error', () => {
     const store = useSolutionStore()
-    store.handleStreamStart(false)
+    startStream(store)
     store.handleInlineError({ title: 'Error', desc: 'fail' })
     store.clearInlineError()
     expect(store.history[0].rounds[0].error).toBeNull()
   })
 
+  it('ignores events from stale requests', () => {
+    const store = useSolutionStore()
+    startStream(store)
+    store.handleStreamChunk({ requestId: 'stale-request', chunk: 'stale' })
+    store.handleThinkingChunk({ requestId: 'stale-request', thinking: 'stale' })
+    expect(store.history[0].rounds[0].aiResponse).toBe('')
+    expect(store.history[0].rounds[0].thinking).toBe('')
+  })
+
   it('deleteHistory removes item', () => {
     const store = useSolutionStore()
-    store.handleStreamStart(false)
+    startStream(store)
     expect(store.history).toHaveLength(1)
     store.deleteHistory(0)
     expect(store.history).toHaveLength(0)
@@ -109,8 +125,8 @@ describe('SolutionStore', () => {
 
   it('selectHistory changes active index', () => {
     const store = useSolutionStore()
-    store.handleStreamStart(false)
-    store.handleStreamStart(false)
+    startStream(store)
+    startStream(store)
     expect(store.history).toHaveLength(2)
     store.selectHistory(1)
     expect(store.activeHistoryIndex).toBe(1)
@@ -130,7 +146,7 @@ describe('SolutionStore', () => {
 
   it('getSummary returns truncated text', () => {
     const store = useSolutionStore()
-    store.handleStreamStart(false)
+    startStream(store)
     store.handleStreamChunk('This is a long response for testing')
     const summary = store.getSummary(store.history[0])
     expect(summary).toBeTruthy()

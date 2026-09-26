@@ -174,6 +174,30 @@
 
             <!-- ─── 右栏：输入与控制 ─── -->
             <section class="col-input">
+              <!-- Answer controls -->
+              <div class="answer-controls" aria-label="回答偏好">
+                <select v-model="settingsStore.settings.answerLength" title="回答长度">
+                  <option value="brief">简短 · 30秒</option>
+                  <option value="standard">标准 · 1分钟</option>
+                  <option value="detailed">详细 · 3分钟</option>
+                </select>
+                <select v-model="settingsStore.settings.answerStyle" title="回答风格">
+                  <option value="formal">正式</option>
+                  <option value="natural">自然</option>
+                  <option value="technical">技术型</option>
+                  <option value="conversational">口语化</option>
+                </select>
+                <select v-model="settingsStore.settings.answerStructure" title="回答结构">
+                  <option value="free">自由组织</option>
+                  <option value="star">STAR法则</option>
+                  <option value="project">项目介绍</option>
+                  <option value="theory">技术原理</option>
+                  <option value="proscons">优缺点分析</option>
+                  <option value="system">系统设计</option>
+                </select>
+                <label class="technical-toggle"><input v-model="settingsStore.settings.includeTechnicalDetails" type="checkbox" /> 技术细节</label>
+              </div>
+
               <!-- Quick Actions -->
               <div class="quick-actions">
                 <button class="qa-btn" @click="insertQuestion('请解释这道题的思路')">
@@ -184,7 +208,7 @@
                   <Icon name="code" :size="12" />
                   <span>代码优化</span>
                 </button>
-                <button class="qa-btn" @click="insertQuestion('用 STAR 法则回答这个问题')">
+                <button class="qa-btn" @click="selectAnswerStructure('star')">
                   <Icon name="star" :size="12" />
                   <span>STAR 回答</span>
                 </button>
@@ -272,21 +296,25 @@ import { useSettingsStore } from '../stores/settings'
 import { useUIStore } from '../stores/ui'
 import { renderMarkdownWithLatex } from '../utils/markdown-latex'
 import { api } from '../services/api'
-import { CancelRunningTask, OpenStandaloneInterview } from '../../wailsjs/go/app/App'
-import { EventsOn, EventsOff } from '../../wailsjs/runtime/runtime'
+import { OpenStandaloneInterview } from '../../wailsjs/go/app/App'
+import { onMany } from '../services/events'
 
 const chatStore = useChatStore()
 const voiceStore = useVoiceStore()
 const settingsStore = useSettingsStore()
 const ui = useUIStore()
 
-const inputText = ref('')
+const inputText = computed({
+  get: () => chatStore.draftText,
+  set: value => chatStore.setDraftText(value),
+})
 const inputRef = ref(null)
 const transcriptRef = ref(null)
 const agentRef = ref(null)
 const attachedScreenshot = ref(null)
 const shortcutsCollapsed = ref(false)
 const streamingText = ref('')
+let cleanupEvents = null
 
 // ── 面试计时器 ──────────────────────────────────────────────
 const timerSeconds = ref(0)
@@ -341,6 +369,8 @@ function saveSize() {
   }
 }
 function setupResizeObserver() {
+  resizeObserver?.disconnect()
+  resizeObserver = null
   const el = document.querySelector('.interview-container')
   if (!el) return
   resizeObserver = new ResizeObserver(() => { saveSize() })
@@ -408,6 +438,17 @@ function loadPosition() {
   dialogPos.y = Math.max(topBarH, window.innerHeight - 640 - 16)
 }
 
+function cleanupDrag() {
+  if (longPressTimer) clearTimeout(longPressTimer)
+  longPressTimer = null
+  isDragging = false
+  isDraggableReady = false
+  document.removeEventListener('mousemove', onTopbarMove)
+  document.removeEventListener('mouseup', cancelLongPress)
+  document.removeEventListener('mousemove', onDrag)
+  document.removeEventListener('mouseup', stopDrag)
+}
+
 function onTopbarMouseDown(e) {
   // 点击按钮时不触发拖动
   if (e.target.closest('.topbar-right, .tb-btn, .opacity-control, .opacity-slider-wrap')) return
@@ -434,10 +475,7 @@ function onTopbarMove(e) {
 }
 
 function cancelLongPress() {
-  clearTimeout(longPressTimer)
-  isDraggableReady = false
-  document.removeEventListener('mousemove', onTopbarMove)
-  document.removeEventListener('mouseup', cancelLongPress)
+  cleanupDrag()
 }
 
 function beginDrag(e) {
@@ -461,10 +499,7 @@ function onDrag(e) {
 }
 
 function stopDrag() {
-  isDragging = false
-  isDraggableReady = false
-  document.removeEventListener('mousemove', onDrag)
-  document.removeEventListener('mouseup', stopDrag)
+  cleanupDrag()
 }
 const transcripts = ref([])
 
@@ -502,6 +537,14 @@ function insertQuestion(text) {
   nextTick(() => { inputRef.value?.focus() })
 }
 
+function selectAnswerStructure(structure) {
+  settingsStore.settings.answerStructure = structure
+  settingsStore.tempSettings.answerStructure = structure
+  settingsStore.saveSettingsSilent()
+  ui.showToast('已启用 STAR 回答结构', 'success', 1500)
+}
+
+
 // ── Markdown ────────────────────────────────────────────────
 function renderMarkdown(text) {
   if (!text) return ''
@@ -525,8 +568,7 @@ async function sendMessage() {
 
 async function stopThinking() {
   try {
-    await CancelRunningTask()
-    chatStore.isLoading = false
+    await chatStore.cancelActiveRequest()
   } catch (e) {
     console.error('Stop thinking error:', e)
   }
@@ -538,6 +580,7 @@ function openStandaloneWindow() {
 
 function close() {
   stopTimer()
+  cleanupDrag()
   showHistoryPanel.value = false
   chatStore.hide()
 }
@@ -557,55 +600,72 @@ function formatTime(iso) {
 }
 
 // ── 事件监听 ────────────────────────────────────────────────
+function onMockTranscribed(event) {
+  const text = typeof event.detail === 'string' ? event.detail.trim() : ''
+  if (text) {
+    inputText.value = text
+    streamingText.value = ''
+  }
+}
+
+function onStorage(e) {
+  if (e.key === 'magic-brush-stt-draft' && e.newValue) {
+    inputText.value = e.newValue.trim()
+    streamingText.value = ''
+  }
+}
+
 onMounted(() => {
-  startTimer()
   loadOpacity()
   loadPosition()
   // 延迟一帧等待 DOM 渲染完成后初始化尺寸
   nextTick(() => { loadSize(); setupResizeObserver() })
 
-  // 流式输出（使用 Wails runtime EventsOn 接收后端事件）
-  EventsOn('chat-stream-chunk', (chunk) => { onStreamChunk({ detail: chunk }) })
-  EventsOn('chat-stream-done', () => { onStreamDone() })
-  EventsOn('chat-stream-error', (error) => { onStreamError({ detail: error }) })
-
-  // 语音转写（同样使用 Wails runtime EventsOn）
-  EventsOn('stt-streaming-text', (text) => {
-    if (text) {
-      streamingText.value += text
-      inputText.value = streamingText.value
-    }
-  })
-  EventsOn('stt-recording-started', () => {
-    streamingText.value = ''
-    addTranscript('interviewer', '...')
-  })
-  EventsOn('stt-recording-stopped', () => { streamingText.value = '' })
-  EventsOn('stt-transcribed', (text) => {
-    if (text) {
-      inputText.value = text
-      // 将最终转写加入转录区
-      addTranscript('me', text)
+  cleanupEvents = onMany({
+    'chat-stream-chunk': payload => onStreamChunk(payload),
+    'chat-stream-done': payload => onStreamDone(payload),
+    'chat-stream-error': payload => onStreamError(payload),
+    'stt-streaming-text': text => {
+      if (text) {
+        streamingText.value += text
+        inputText.value = streamingText.value
+      }
+    },
+    'stt-recording-started': () => {
       streamingText.value = ''
-    }
+      addTranscript('interviewer', '...')
+    },
+    'stt-recording-stopped': () => { streamingText.value = '' },
+    'stt-transcribed': text => {
+      if (text) {
+        inputText.value = text
+        addTranscript('me', text)
+        streamingText.value = ''
+      }
+    },
   })
+  window.addEventListener('mock-stt-transcribed', onMockTranscribed)
+  window.addEventListener('storage', onStorage)
+  try {
+    const draft = localStorage.getItem('magic-brush-stt-draft')
+    if (draft) inputText.value = draft.trim()
+  } catch (_) {}
 })
 
 onUnmounted(() => {
   stopTimer()
+  cleanupDrag()
   if (resizeObserver) resizeObserver.disconnect()
-  EventsOff('chat-stream-chunk')
-  EventsOff('chat-stream-done')
-  EventsOff('chat-stream-error')
-  EventsOff('stt-streaming-text')
-  EventsOff('stt-recording-started')
-  EventsOff('stt-recording-stopped')
-  EventsOff('stt-transcribed')
+  resizeObserver = null
+  cleanupEvents?.()
+  cleanupEvents = null
+  window.removeEventListener('mock-stt-transcribed', onMockTranscribed)
+  window.removeEventListener('storage', onStorage)
 })
 
-function onStreamChunk(e) { chatStore.handleStreamChunk(e.detail) }
-function onStreamDone() { chatStore.handleStreamDone() }
-function onStreamError(e) { chatStore.handleStreamError(e.detail) }
+function onStreamChunk(payload) { chatStore.handleStreamChunk(payload) }
+function onStreamDone(payload) { chatStore.handleStreamDone(payload) }
+function onStreamError(payload) { chatStore.handleStreamError(payload) }
 
 // ── 自动滚动 ────────────────────────────────────────────────
 watch(() => chatStore.messages.length, () => {
@@ -1082,7 +1142,14 @@ watch(() => chatStore.isVisible, (v) => {
 @keyframes tdot-bounce { 0%,80%,100% { transform: scale(0.6); opacity: 0.3; } 40% { transform: scale(1); opacity: 0.8; } }
 
 /* ═══ 右栏：输入与控制 ═══ */
-/* ─── Quick Actions ─── */
+/* ─── Answer Controls ─── */
+.answer-controls { display: flex; flex-wrap: wrap; gap: 4px; padding: 7px 10px 3px; }
+.answer-controls select, .technical-toggle { background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08); border-radius: 5px; color: rgba(255,255,255,.65); font: inherit; font-size: 10px; padding: 4px 5px; }
+.answer-controls select { color-scheme: dark; }
+.answer-controls select option { background: #20232d; color: #f5f7ff; }
+.technical-toggle { display: inline-flex; align-items: center; gap: 3px; cursor: pointer; }
+.technical-toggle input { accent-color: var(--accent, #8b7cff); }
+
 .quick-actions {
   display: flex;
   flex-wrap: wrap;

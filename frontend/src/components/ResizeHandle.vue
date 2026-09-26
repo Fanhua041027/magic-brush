@@ -7,6 +7,7 @@
 </template>
 
 <script setup>
+import { onUnmounted } from 'vue'
 import { WindowGetSize, WindowSetSize } from '../../wailsjs/runtime/runtime'
 import { api } from '../services/api'
 
@@ -20,13 +21,26 @@ let startY = 0
 let startWidth = 0
 let startHeight = 0
 
+let disposed = false
+let resizing = false
+
+function cleanupResize() {
+  document.removeEventListener('mousemove', onResize)
+  document.removeEventListener('mouseup', stopResize)
+  document.body.style.cursor = ''
+  document.body.style.userSelect = ''
+  resizing = false
+}
+
 async function startResize(e) {
   e.preventDefault()
   const size = await WindowGetSize()
+  if (disposed) return
   startWidth = size.w
   startHeight = size.h
   startX = e.screenX
   startY = e.screenY
+  resizing = true
   document.addEventListener('mousemove', onResize)
   document.addEventListener('mouseup', stopResize)
   document.body.style.cursor = 'nwse-resize'
@@ -42,20 +56,26 @@ function onResize(e) {
 }
 
 async function stopResize() {
-  document.removeEventListener('mousemove', onResize)
-  document.removeEventListener('mouseup', stopResize)
-  document.body.style.cursor = ''
-  document.body.style.userSelect = ''
+  if (!resizing) return
+  cleanupResize()
+  if (disposed) return
   try {
     const size = await WindowGetSize()
+    if (disposed) return
     const settings = await api.getSettings()
+    if (disposed) return
     settings.windowWidth = size.w
     settings.windowHeight = size.h
     await api.updateSettings(JSON.stringify(settings))
   } catch (e) {
-    console.error('保存窗口尺寸失败:', e)
+    if (!disposed) console.error('保存窗口尺寸失败:', e)
   }
 }
+
+onUnmounted(() => {
+  disposed = true
+  cleanupResize()
+})
 </script>
 
 <style scoped>

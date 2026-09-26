@@ -30,7 +30,9 @@ class STTManager:
 
     def __init__(self, api_key: str = "", whisper_model: str = "medium",
                  whisper_device: str = "auto", whisper_language: str = "zh",
-                 priority: Optional[List[str]] = None):
+                 priority: Optional[List[str]] = None,
+                 qwen_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                 qwen_model: str = "paraformer-realtime-v2"):
         """
         Args:
             priority: 服务优先级列表，如 ["qwen_cloud"] 只加载云端
@@ -40,6 +42,10 @@ class STTManager:
         self.whisper_model_name = whisper_model
         self.whisper_device = whisper_device
         self.whisper_language = whisper_language
+        self.qwen_base_url = qwen_base_url
+        self.qwen_model = qwen_model
+        self._active_streaming_service: Optional[str] = None
+        self._streaming_lock = threading.Lock()
         self._priority_config = priority or list(self.DEFAULT_PRIORITY)
 
         # 服务实例
@@ -109,7 +115,7 @@ class STTManager:
             return False
         try:
             from qwen_stt import QwenSTT
-            self._qwen_cloud = QwenSTT(self.api_key)
+            self._qwen_cloud = QwenSTT(self.api_key, base_url=self.qwen_base_url, model=self.qwen_model)
             return True
         except Exception as e:
             print(f"[STTManager] 千问云端初始化异常: {e}")
@@ -135,11 +141,13 @@ class STTManager:
 
     def get_available_services(self) -> List[str]:
         """获取当前可用服务列表"""
-        return list(self._current_priority)
+        with self._lock:
+            return list(self._current_priority)
 
     def get_primary_service(self) -> Optional[str]:
         """获取当前主服务"""
-        return self._current_priority[0] if self._current_priority else None
+        with self._lock:
+            return self._current_priority[0] if self._current_priority else None
 
     def get_service_name(self, service_id: str) -> str:
         """获取服务显示名称"""
@@ -147,11 +155,13 @@ class STTManager:
 
     def get_usage_stats(self) -> dict:
         """获取使用统计"""
-        return dict(self._usage_stats)
+        with self._lock:
+            return dict(self._usage_stats)
 
     def is_any_ready(self) -> bool:
         """是否有任何服务可用"""
-        return len(self._current_priority) > 0
+        with self._lock:
+            return len(self._current_priority) > 0
 
     # ── 核心识别 ─────────────────────────────────────────────
 
@@ -176,9 +186,10 @@ class STTManager:
         for service_id in priority:
             text = self._try_recognize(service_id, audio_data, sample_rate)
             if text:
-                self._usage_stats[service_id] = self._usage_stats.get(service_id, 0) + 1
+                with self._lock:
+                    self._usage_stats[service_id] = self._usage_stats.get(service_id, 0) + 1
                 source = self.SERVICE_NAMES.get(service_id, service_id)
-                print(f"[STTManager] ✅ 识别成功 ({source}): {text[:50]}...")
+                print(f"[STTManager] ✅ 识别成功 ({source}): text_length={len(text)}")
                 return text, service_id
             errors.append(f"{service_id}: 无结果")
 
@@ -208,16 +219,21 @@ class STTManager:
         Returns:
             使用的服务名, None 如果无可用服务
         """
-        for service_id in self._current_priority:
-            engine = self._get_streaming_engine(service_id)
-            if engine and hasattr(engine, 'start_streaming'):
-                try:
-                    engine.start_streaming(callback, sample_rate)
-                    print(f"[STTManager] ▶️ 流式识别启动 ({self.SERVICE_NAMES[service_id]})")
-                    return service_id
-                except Exception as e:
-                    print(f"[STTManager] {service_id} 流式启动失败: {e}")
-                    continue
+        with self._streaming_lock:
+            if self._active_streaming_service:
+                return self._active_streaming_service
+            for service_id in self._current_priority:
+                engine = self._get_streaming_engine(service_id)
+                if engine and hasattr(engine, 'start_streaming'):
+                    try:
+                        result = engine.start_streaming(callback, sample_rate)
+                        if result is False:
+                            raise RuntimeError("streaming engine did not become ready")
+                        self._active_streaming_service = service_id
+                        print(f"[STTManager] ▶️ 流式识别启动 ({self.SERVICE_NAMES[service_id]})")
+                        return service_id
+                    except Exception as e:
+                        print(f"[STTManager] {service_id} 流式启动失败: {e}")
         print("[STTManager] ❌ 无可用流式识别服务")
         return None
 
@@ -228,30 +244,31 @@ class STTManager:
         Returns:
             (最终识别文本, 使用的服务名)
         """
-        # 按优先级反向停止，使用最先启动的服务结果
-        for service_id in reversed(self._current_priority):
-            engine = self._get_streaming_engine(service_id)
-            if engine and hasattr(engine, 'stop_streaming'):
-                try:
-                    text = engine.stop_streaming()
-                    if text:
-                        source = self.SERVICE_NAMES.get(service_id, service_id)
-                        print(f"[STTManager] ⏹️ 流式停止 ({source})")
-                        return text, service_id
-                except Exception as e:
-                    print(f"[STTManager] {service_id} 停止异常: {e}")
-                    continue
+        with self._streaming_lock:
+            service_id = self._active_streaming_service
+            self._active_streaming_service = None
+        if not service_id:
+            return "", ""
+        engine = self._get_streaming_engine(service_id)
+        if engine and hasattr(engine, 'stop_streaming'):
+            try:
+                text = engine.stop_streaming()
+                return text, service_id
+            except Exception as e:
+                print(f"[STTManager] {service_id} 停止异常: {e}")
         return "", ""
 
     def add_audio_chunk(self, audio_chunk: np.ndarray):
-        """向所有已启动的流式服务添加音频块"""
-        for service_id in self._current_priority:
-            engine = self._get_streaming_engine(service_id)
-            if engine and hasattr(engine, 'add_audio_chunk'):
-                try:
-                    engine.add_audio_chunk(audio_chunk)
-                except Exception:
-                    pass
+        with self._streaming_lock:
+            service_id = self._active_streaming_service
+        if not service_id:
+            return
+        engine = self._get_streaming_engine(service_id)
+        if engine and hasattr(engine, 'add_audio_chunk'):
+            try:
+                engine.add_audio_chunk(audio_chunk)
+            except Exception as e:
+                print(f"[STTManager] {service_id} 音频投递失败: {e}")
 
     def _get_streaming_engine(self, service_id: str):
         """获取流式引擎实例"""
@@ -267,9 +284,12 @@ class STTManager:
 
     def health_status(self) -> dict:
         """获取健康状态"""
+        with self._lock:
+            priority = list(self._current_priority)
+            usage = dict(self._usage_stats)
         return {
-            "available_services": self._current_priority,
-            "primary": self.get_primary_service(),
-            "service_names": {s: self.SERVICE_NAMES.get(s, s) for s in self._current_priority},
-            "usage": self._usage_stats,
+            "available_services": priority,
+            "primary": priority[0] if priority else None,
+            "service_names": {s: self.SERVICE_NAMES.get(s, s) for s in priority},
+            "usage": usage,
         }

@@ -1,7 +1,10 @@
 package config
 
 import (
+	"encoding/json"
 	"os"
+	"runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -32,8 +35,8 @@ func TestNewDefaultConfig(t *testing.T) {
 	if cfg.CompressionQuality != 92 {
 		t.Fatalf("expected 92, got %d", cfg.CompressionQuality)
 	}
-	if cfg.STTService != "qwen_local" {
-		t.Fatalf("expected 'qwen_local', got '%s'", cfg.STTService)
+	if cfg.STTService != "qwen_cloud" {
+		t.Fatalf("expected 'qwen_cloud', got '%s'", cfg.STTService)
 	}
 	if cfg.Shortcuts == nil {
 		t.Fatal("expected shortcuts to be initialized")
@@ -95,6 +98,23 @@ func TestConfigDefaults(t *testing.T) {
 			t.Fatal("expected validation error for compression > 100")
 		}
 	})
+
+	t.Run("reject unsafe service URL and oversized content", func(t *testing.T) {
+		cfg := NewDefaultConfig()
+		cfg.BaseURL = "http://example.com/v1"
+		if err := cfg.Validate(); err == nil {
+			t.Fatal("expected insecure remote URL to be rejected")
+		}
+		cfg.BaseURL = "http://127.0.0.1:8080/v1"
+		if err := cfg.Validate(); err != nil {
+			t.Fatalf("localhost URL rejected: %v", err)
+		}
+		cfg.BaseURL = "https://example.com/v1"
+		cfg.ResumeContent = strings.Repeat("x", (1<<20)+1)
+		if err := cfg.Validate(); err == nil {
+			t.Fatal("expected oversized resume content to be rejected")
+		}
+	})
 }
 
 func TestConfigToJSON(t *testing.T) {
@@ -105,6 +125,59 @@ func TestConfigToJSON(t *testing.T) {
 	}
 	if len(json) < 10 {
 		t.Fatal("JSON too short")
+	}
+}
+
+func TestPublicConfigDoesNotExposeSecrets(t *testing.T) {
+	cfg := NewDefaultConfig()
+	cfg.APIKey = "main-secret"
+	cfg.ScreenshotAPIKey = "vision-secret"
+	encoded, err := json.Marshal(cfg.Public())
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(encoded)
+	if strings.Contains(text, "main-secret") || strings.Contains(text, "vision-secret") || strings.Contains(text, `"apiKey"`) || strings.Contains(text, `"screenshotApiKey"`) {
+		t.Fatalf("public config leaked a credential: %s", text)
+	}
+	if !strings.Contains(text, `"apiKeyConfigured":true`) || !strings.Contains(text, `"screenshotApiKeyConfigured":true`) {
+		t.Fatalf("public config omitted credential status: %s", text)
+	}
+}
+
+func TestUpdateFromJSONPreservesOmittedSecret(t *testing.T) {
+	cm := newTestConfigManager()
+	if err := cm.Patch(func(cfg *Config) { cfg.APIKey = "secret" }); err != nil {
+		t.Fatal(err)
+	}
+	if err := cm.UpdateFromJSON(`{"model":"new-model"}`); err != nil {
+		t.Fatal(err)
+	}
+	if got := cm.Get(); got.APIKey != "secret" || got.Model != "new-model" {
+		t.Fatalf("unexpected merged config: key=%q model=%q", got.APIKey, got.Model)
+	}
+	if err := cm.UpdateFromJSON(`{"apiKey":""}`); err != nil {
+		t.Fatal(err)
+	}
+	if got := cm.Get().APIKey; got != "" {
+		t.Fatalf("explicit secret clear failed: %q", got)
+	}
+}
+
+func TestSaveUsesPrivatePermissions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows does not expose owner-only mode bits through os.FileMode")
+	}
+	cm := newTestConfigManager()
+	if err := cm.Save(); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(cm.configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0600 {
+		t.Fatalf("config permissions = %o, want 600", info.Mode().Perm())
 	}
 }
 
@@ -209,4 +282,37 @@ func TestConfigManager(t *testing.T) {
 			t.Fatalf("expected 'model2', got '%s'", cfg.Model)
 		}
 	})
+}
+
+func TestEncryptUsesCurrentFormat(t *testing.T) {
+	plaintext := []byte(`{"apiKey":"secret"}`)
+	ciphertext, err := encrypt(plaintext)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ciphertext) <= len(currentCipherHeader) || string(ciphertext[:len(currentCipherHeader)]) != string(currentCipherHeader) {
+		t.Fatal("ciphertext missing current header")
+	}
+	decoded, err := decrypt(ciphertext)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(decoded) != string(plaintext) {
+		t.Fatalf("round trip mismatch: %q", decoded)
+	}
+}
+
+func TestLegacyCiphertextCanBeRead(t *testing.T) {
+	plaintext := []byte(`{"model":"legacy"}`)
+	ciphertext, err := sealWithKey(legacyAESKey, plaintext)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := decrypt(ciphertext)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(decoded) != string(plaintext) {
+		t.Fatalf("legacy round trip mismatch: %q", decoded)
+	}
 }

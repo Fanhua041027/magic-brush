@@ -97,7 +97,7 @@
 
 <script setup>
 import { computed, ref, watch } from 'vue'
-import { marked } from 'marked'
+import { renderMarkdownWithLatex } from '../utils/markdown-latex'
 import Icon from './Icon.vue'
 
 const props = defineProps({
@@ -118,7 +118,7 @@ const fileName = computed(() => {
 
 const renderedContent = computed(() => {
   if (!localContent.value) return ''
-  return marked.parse(localContent.value)
+  return renderMarkdownWithLatex(localContent.value)
 })
 
 watch(() => props.rawContent, (newVal) => {

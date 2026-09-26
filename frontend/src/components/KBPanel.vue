@@ -79,7 +79,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { api } from '../services/api'
 
 defineEmits(['select-result'])
@@ -91,49 +91,71 @@ const fileCount = ref(0)
 const query = ref('')
 const searchResults = ref([])
 const isSearching = ref(false)
+let disposed = false
+let statusGeneration = 0
+let searchGeneration = 0
 
 onMounted(async () => {
   await refreshStatus()
 })
 
+onUnmounted(() => {
+  disposed = true
+  statusGeneration++
+  searchGeneration++
+})
+
 async function refreshStatus() {
+  const generation = ++statusGeneration
   try {
     const status = await api.getKBStatus()
+    if (disposed || generation !== statusGeneration) return
     kbReady.value = status.ready || false
     sectionCount.value = status.section_count || 0
     fileCount.value = status.file_count || 0
   } catch (e) {
-    kbReady.value = false
+    if (!disposed && generation === statusGeneration) kbReady.value = false
   }
 }
 
 async function importKB() {
+  if (disposed) return
+  ++statusGeneration
   const path = await api.selectKBDirectory()
+  if (disposed) return
   if (path) {
     await refreshStatus()
   }
 }
 
 async function exportKB() {
+  if (disposed) return
+  ++searchGeneration
   await api.clearKB()
+  if (disposed) return
   kbReady.value = false
   sectionCount.value = 0
   fileCount.value = 0
   query.value = ''
   searchResults.value = []
+  isSearching.value = false
 }
 
 async function doSearch() {
-  if (!query.value.trim()) return
+  const text = query.value.trim()
+  if (!text || disposed) return
+  const generation = ++searchGeneration
   isSearching.value = true
   try {
-    const result = await api.searchKB(query.value)
+    const result = await api.searchKB(text)
+    if (disposed || generation !== searchGeneration) return
     searchResults.value = result.results || []
   } catch (e) {
+    if (disposed || generation !== searchGeneration) return
     console.error('KB search error:', e)
     searchResults.value = []
   } finally {
-    isSearching.value = false
+    if (!disposed && generation === searchGeneration) isSearching.value = false
   }
 }
 </script>

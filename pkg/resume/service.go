@@ -139,7 +139,7 @@ func (s *Service) ParseResume(ctx context.Context) (string, error) {
 	}
 
 	// 直接从 PDF 提取文本（不依赖 LLM 视觉能力）
-	logger.Printf("从 PDF 提取文本: %s", resumePath)
+	logger.Printf("从 PDF 提取文本: path_length=%d", len(resumePath))
 	textContent, err := extractTextFromPDF(resumePath)
 	if err != nil {
 		return "", fmt.Errorf("PDF 文本提取失败: %v", err)

@@ -15,6 +15,12 @@ import tempfile
 import time
 import threading
 import re
+import socket
+import base64
+import requests
+import websocket
+import uuid
+import queue
 from collections import deque
 from typing import Optional, Callable
 
@@ -158,6 +164,22 @@ def restore_punctuation(text: str) -> str:
 
 # ── DashScope 回调 ────────────────────────────────────────
 
+def _extract_text(value) -> list[str]:
+    """Extract transcript text from DashScope's varying response shapes."""
+    found = []
+    if isinstance(value, dict):
+        text = value.get('text')
+        if isinstance(text, str) and text.strip():
+            found.append(text.strip())
+        for key in ('sentence', 'sentences', 'output', 'result'):
+            if key in value:
+                found.extend(_extract_text(value[key]))
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            found.extend(_extract_text(item))
+    return found
+
+
 class QwenSTTCallback(RecognitionCallback):
     """DashScope Recognition 回调"""
 
@@ -218,10 +240,11 @@ class QwenSTT:
         "paraformer-v2",
     ]
 
-    def __init__(self, api_key: str, language: str = "zh"):
+    def __init__(self, api_key: str, language: str = "zh", base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1", model: str = "paraformer-realtime-v2"):
         self.api_key = api_key
+        self.base_url = base_url.rstrip('/')
+        self.model = model
         dashscope.api_key = api_key
-        self.model = self.SUPPORTED_MODELS[0]
         self.language = language
         self._failed_models = set()
         self._deduplicator = TextDeduplicator()
@@ -233,8 +256,13 @@ class QwenSTT:
         self._buffer_lock = threading.Lock()
         self._callback: Optional[Callable] = None
         self._stop_event = threading.Event()
-
-    def _get_next_model(self) -> str:
+        self._stream_queue = queue.Queue(maxsize=100)
+        self._stream_ws = None
+        self._stream_texts = []
+        self._stream_error = None
+        self._stream_ready = threading.Event()
+        self._stream_stop_lock = threading.Lock()
+        self._stream_sentence_ids = set()
         for model in self.SUPPORTED_MODELS:
             if model not in self._failed_models:
                 return model
@@ -246,6 +274,119 @@ class QwenSTT:
         print(f"[QwenSTT] ⚠️ 模型 {model} 标记失败，切换中...", flush=True)
         self.model = self._get_next_model()
         print(f"[QwenSTT] 🔄 切换到模型: {self.model}", flush=True)
+
+    @staticmethod
+    def _event_name(event: dict) -> str:
+        header = event.get("header") or {}
+        return header.get("event") or header.get("action") or ""
+
+    @staticmethod
+    def _sentence_text(event: dict) -> str:
+        if QwenSTT._event_name(event) != "result-generated":
+            return ""
+        sentence = (((event.get("payload") or {}).get("output") or {}).get("sentence") or {})
+        if sentence.get("heartbeat") is True or sentence.get("sentence_end") is not True:
+            return ""
+        text = sentence.get("text")
+        return text.strip() if isinstance(text, str) else ""
+
+    def _websocket_url(self) -> str:
+        """Build the DashScope duplex inference WebSocket endpoint."""
+        url = self.base_url
+        if url.startswith("https://"):
+            url = "wss://" + url[len("https://"):]
+        elif url.startswith("http://"):
+            url = "ws://" + url[len("http://"):]
+        if "/compatible-mode/v1" in url:
+            return url.replace("/compatible-mode/v1", "/api-ws/v1/inference")
+        if url.endswith("/api/v1"):
+            return url[:-len("/api/v1")] + "/api-ws/v1/inference"
+        return url.rstrip("/") + "/api-ws/v1/inference"
+
+    def _recognize_websocket(self, audio: np.ndarray) -> str:
+        """Recognize audio through Qwen's duplex WebSocket protocol."""
+        task_id = str(uuid.uuid4())
+        headers = [f"Authorization: Bearer {self.api_key}", "User-Agent: magic-brush/1.0"]
+        workspace_id = os.environ.get("DASHSCOPE_WORKSPACE_ID", "").strip()
+        if workspace_id:
+            headers.append(f"X-DashScope-WorkSpace: {workspace_id}")
+        ws = websocket.create_connection(
+            self._websocket_url(),
+            header=headers,
+            timeout=30,
+        )
+        try:
+            ws.send(json.dumps({
+                "header": {"action": "run-task", "task_id": task_id, "streaming": "duplex"},
+                "payload": {
+                    "task_group": "audio", "task": "asr", "function": "recognition",
+                    "model": self.model,
+                    "parameters": {
+                        "format": "pcm", "sample_rate": 16000,
+                        "language_hints": [self.language] if self.language and self.language != "auto" else ["zh", "en"],
+                        "semantic_punctuation_enabled": True,
+                        "heartbeat": True,
+                    },
+                    "input": {},
+                },
+            }), opcode=websocket.ABNF.OPCODE_TEXT)
+            started = False
+            texts = []
+            pcm = np.asarray(audio, dtype=np.float32)
+            pcm16 = np.clip(pcm, -1.0, 1.0).astype(np.float32)
+            pcm16 = (pcm16 * 32767.0).astype("<i2").tobytes()
+            for offset in range(0, len(pcm16), 3200):
+                while not started:
+                    message = ws.recv()
+                    if isinstance(message, bytes):
+                        continue
+                    try:
+                        event = json.loads(message)
+                    except (TypeError, json.JSONDecodeError):
+                        continue
+                    action = self._event_name(event)
+                    if action == "task-started":
+                        started = True
+                    elif action in ("task-failed", "error"):
+                        raise RuntimeError(str(event))
+                ws.send(pcm16[offset:offset + 3200], opcode=websocket.ABNF.OPCODE_BINARY)
+                ws.settimeout(0.01)
+                try:
+                    while True:
+                        message = ws.recv()
+                        if isinstance(message, str):
+                            try:
+                                event = json.loads(message)
+                                text = self._sentence_text(event)
+                                if text:
+                                    texts.append(text)
+                            except json.JSONDecodeError:
+                                pass
+                except (websocket.WebSocketTimeoutException, socket.timeout):
+                    pass
+                finally:
+                    ws.settimeout(30)
+            ws.send(json.dumps({
+                "header": {"action": "finish-task", "task_id": task_id, "streaming": "duplex"},
+                "payload": {"input": {}},
+            }), opcode=websocket.ABNF.OPCODE_TEXT)
+            while True:
+                message = ws.recv()
+                if isinstance(message, bytes):
+                    continue
+                event = json.loads(message)
+                text = self._sentence_text(event)
+                if text:
+                    texts.append(text)
+                event_name = self._event_name(event)
+                if event_name == "task-finished":
+                    break
+                if event_name == "task-failed":
+                    header = event.get("header") or {}
+                    raise RuntimeError(f"{header.get('error_code', 'TASK_FAILED')}: {header.get('error_message', '')}")
+            return self._clean_text("".join(dict.fromkeys(t.strip() for t in texts if t.strip())))
+        finally:
+            ws.close()
 
     def recognize(self, audio_data: np.ndarray, sample_rate: int = 16000) -> str:
         """
@@ -268,13 +409,38 @@ class QwenSTT:
                 print(f"[QwenSTT] ⏭️ 音频过短 ({len(audio)} samples) 或静音 (RMS={rms:.6f})", flush=True)
                 return ""
 
+            if self.model.startswith("qwen-audio"):
+                text = self._recognize_websocket(audio)
+                print(f"[QwenSTT] ASR result: text_length={len(text)}", flush=True)
+                return text
+
             # ── 2. 保存临时 WAV ──
             with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
                 sf.write(f.name, audio, 16000)
                 tmp_path = f.name
 
             try:
-                # ── 3. 调用 API ──
+                if self.model.startswith("qwen-audio"):
+                    wav_buffer = io.BytesIO()
+                    sf.write(wav_buffer, audio, 16000, format="WAV", subtype="PCM_16")
+                    encoded = base64.b64encode(wav_buffer.getvalue()).decode("ascii")
+                    response = requests.post(
+                        self.base_url.replace("/compatible-mode/v1", "/api/v1") + "/services/aigc/multimodal-generation/generation",
+                        headers={"Authorization": "Bearer " + self.api_key, "Content-Type": "application/json"},
+                        json={"model": self.model, "input": {"messages": [{"role": "user", "content": [
+                            {"audio": "data:audio/wav;base64," + encoded},
+                            {"text": "请准确转写这段音频，只输出识别文字。"},
+                        ]}]}, "parameters": {"temperature": 0}},
+                        timeout=120,
+                    )
+                    if not response.ok:
+                        raise RuntimeError(f"ASR {response.status_code}: {response.text[:500]}")
+                    payload = response.json()
+                    text = "".join(_extract_text(payload.get("output", payload))).strip()
+                    print(f"[QwenSTT] ASR result: text_length={len(text)}", flush=True)
+                    return self._clean_text(text)
+
+                # ── 3. 调用 DashScope API ──
                 cb = QwenSTTCallback()
 
                 rec_params = {
@@ -311,17 +477,9 @@ class QwenSTT:
 
                 # fallback: 从 output.sentence 提取
                 if not text and result.status_code == 200 and result.output:
-                    output = result.output
-                    if isinstance(output, dict):
-                        sentences = output.get('sentence', [])
-                        texts = []
-                        for s in sentences:
-                            if isinstance(s, dict):
-                                t = s.get('text', '')
-                                if t and t.strip():
-                                    texts.append(t.strip())
-                        if texts:
-                            text = "".join(texts)
+                    texts = _extract_text(result.output)
+                    if texts:
+                        text = "".join(dict.fromkeys(texts))
 
                 # 模型不支持的错误码 44 → 切换模型重试
                 if result.status_code == 44:
@@ -333,7 +491,7 @@ class QwenSTT:
                     text = zhconv.convert(text, "zh-hans")
                     text = restore_punctuation(text)
                     text = self._clean_text(text)
-                    print(f"[QwenSTT] ✅ 识别成功 ({len(text)} chars): [{text[:80]}...]", flush=True)
+                    print(f"[QwenSTT] ✅ 识别成功 ({len(text)} chars)", flush=True)
                 else:
                     print(f"[QwenSTT] ⚠️ 无结果, status={result.status_code}", flush=True)
 
@@ -371,79 +529,131 @@ class QwenSTT:
     # ── 流式接口 ─────────────────────────────────────────────
 
     def start_streaming(self, callback: Callable, sample_rate: int = 16000):
-        """开始流式识别"""
-        if self._is_streaming:
-            return
-
-        self._is_streaming = True
-        self._callback = callback
-        self._audio_buffer = []
-        self._stop_event.clear()
-        self._deduplicator.reset()
-
-        self._stream_thread = threading.Thread(
-            target=self._streaming_worker,
-            args=(sample_rate,),
-            daemon=True,
-        )
-        self._stream_thread.start()
-        print("[QwenSTT] ▶️ Streaming started", flush=True)
+        """Start one persistent duplex WebSocket session and await readiness."""
+        with self._stream_stop_lock:
+            if self._is_streaming:
+                return False
+            self._is_streaming = True
+            self._callback = callback
+            self._stop_event.clear()
+            self._stream_error = None
+            self._stream_ready.clear()
+            self._stream_texts = []
+            self._stream_sentence_ids = set()
+            self._stream_queue = queue.Queue(maxsize=100)
+            self._stream_thread = threading.Thread(target=self._streaming_worker, daemon=True)
+            self._stream_thread.start()
+        if not self._stream_ready.wait(timeout=10):
+            self._stream_error = self._stream_error or "streaming session startup timeout"
+            self.stop_streaming()
+            return False
+        if self._stream_error:
+            self.stop_streaming()
+            return False
+        return True
 
     def stop_streaming(self) -> str:
-        """停止流式识别，返回累积的最终结果"""
-        if not self._is_streaming:
-            return ""
-
-        self._is_streaming = False
-        self._stop_event.set()
-
-        if self._stream_thread:
-            self._stream_thread.join(timeout=5.0)
-
-        with self._buffer_lock:
-            if self._audio_buffer:
-                try:
-                    audio_data = np.concatenate(self._audio_buffer, axis=0).flatten()
-                    self._audio_buffer = []
-                    text = self.recognize(audio_data)
-                    print(f"[QwenSTT] ⏹️ Streaming final result ({len(text)} chars)", flush=True)
-                    return text
-                except Exception as e:
-                    print(f"[QwenSTT] ⏹️ Streaming final error: {e}", flush=True)
-
-        return ""
+        """Flush audio, finish the duplex task, and return committed text."""
+        with self._stream_stop_lock:
+            if not self._is_streaming and not self._stream_thread:
+                return ""
+            self._is_streaming = False
+            self._stop_event.set()
+            try:
+                self._stream_queue.put_nowait(None)
+            except queue.Full:
+                pass
+            thread = self._stream_thread
+        if thread:
+            thread.join(timeout=15)
+            if thread.is_alive():
+                self._stream_error = self._stream_error or "streaming worker stop timeout"
+            with self._stream_stop_lock:
+                if self._stream_thread is thread and not thread.is_alive():
+                    self._stream_thread = None
+        if self._stream_error:
+            print(f"[QwenSTT] streaming error: {self._stream_error}", flush=True)
+        return self._clean_text("".join(self._stream_texts))
 
     def add_audio_chunk(self, audio_chunk: np.ndarray):
-        """添加音频块到缓冲区（线程安全）"""
+        """Queue canonical audio as mono PCM16 without blocking capture."""
         if not self._is_streaming:
             return
-        with self._buffer_lock:
-            # 确保是一维
-            chunk = audio_chunk.flatten() if audio_chunk.ndim > 1 else audio_chunk
-            self._audio_buffer.append(chunk)
+        chunk = np.asarray(audio_chunk, dtype=np.float32)
+        if chunk.ndim > 1:
+            chunk = chunk.mean(axis=1)
+        pcm = (np.clip(chunk.reshape(-1), -1, 1) * 32767).astype("<i2").tobytes()
+        try:
+            self._stream_queue.put_nowait(pcm)
+        except queue.Full:
+            print("[QwenSTT] streaming queue full; dropping audio chunk", flush=True)
 
-    def _streaming_worker(self, sample_rate: int):
-        """流式处理线程 — 定期识别累积的音频"""
-        last_process_time = time.time()
-        process_interval = 0.8  # 每 800ms 处理一次（给足够音频提升准确率）
-
-        while self._is_streaming and not self._stop_event.is_set():
-            current_time = time.time()
-            if current_time - last_process_time >= process_interval:
-                with self._buffer_lock:
-                    if self._audio_buffer:
-                        audio_data = np.concatenate(self._audio_buffer, axis=0).flatten()
-                        self._audio_buffer = []
-
+    def _streaming_worker(self):
+        """Own the persistent WebSocket and both duplex directions."""
+        ws = None
+        try:
+            headers = [f"Authorization: Bearer {self.api_key}", "User-Agent: magic-brush/1.0"]
+            workspace = os.environ.get("DASHSCOPE_WORKSPACE_ID", "").strip()
+            if workspace:
+                headers.append(f"X-DashScope-WorkSpace: {workspace}")
+            ws = websocket.create_connection(self._websocket_url(), header=headers, timeout=30)
+            task_id = str(uuid.uuid4())
+            ws.send(json.dumps({"header": {"action": "run-task", "task_id": task_id, "streaming": "duplex"}, "payload": {"task_group": "audio", "task": "asr", "function": "recognition", "model": self.model, "parameters": {"format": "pcm", "sample_rate": 16000, "language_hints": [self.language] if self.language != "auto" else ["zh", "en"], "semantic_punctuation_enabled": True, "heartbeat": True}, "input": {}}}))
+            while True:
+                event = json.loads(ws.recv())
+                name = self._event_name(event)
+                if name == "task-failed":
+                    raise RuntimeError(f"{event.get('header', {}).get('error_code')}: {event.get('header', {}).get('error_message')}")
+                if name == "task-started":
+                    self._stream_ready.set()
+                    break
+            ws.settimeout(0.05)
+            while self._is_streaming or not self._stream_queue.empty():
                 try:
-                    text = self.recognize(audio_data, sample_rate)
-                    if text and self._callback:
-                        self._callback(text)
-                except Exception as e:
-                    print(f"[QwenSTT] Streaming process error: {e}", flush=True)
-
-                last_process_time = current_time
-            else:
-                time.sleep(0.1)
-
-        print("[QwenSTT] Streaming worker stopped", flush=True)
+                    chunk = self._stream_queue.get(timeout=0.05)
+                    if chunk is None:
+                        continue
+                    ws.send(chunk, opcode=websocket.ABNF.OPCODE_BINARY)
+                except queue.Empty:
+                    pass
+                try:
+                    while True:
+                        msg = ws.recv()
+                        if isinstance(msg, str):
+                            event = json.loads(msg)
+                            sentence = (((event.get("payload") or {}).get("output") or {}).get("sentence") or {})
+                            if self._event_name(event) == "result-generated" and not sentence.get("heartbeat"):
+                                text = sentence.get("text", "").strip()
+                                sentence_id = sentence.get("sentence_id")
+                                key = str(sentence_id) if sentence_id is not None else text
+                                if text and sentence.get("sentence_end") is True and key not in self._stream_sentence_ids:
+                                    self._stream_sentence_ids.add(key)
+                                    self._stream_texts.append(text)
+                                    if self._callback:
+                                        self._callback(text)
+                except (websocket.WebSocketTimeoutException, socket.timeout):
+                    pass
+            ws.settimeout(30)
+            ws.send(json.dumps({"header": {"action": "finish-task", "task_id": task_id, "streaming": "duplex"}, "payload": {"input": {}}}))
+            while True:
+                event = json.loads(ws.recv())
+                name = self._event_name(event)
+                if name == "result-generated":
+                    text = self._sentence_text(event)
+                    sentence = (((event.get("payload") or {}).get("output") or {}).get("sentence") or {})
+                    sentence_id = sentence.get("sentence_id")
+                    key = str(sentence_id) if sentence_id is not None else text
+                    if text and key not in self._stream_sentence_ids:
+                        self._stream_sentence_ids.add(key)
+                        self._stream_texts.append(text)
+                        if self._callback:
+                            self._callback(text)
+                if name == "task-finished":
+                    break
+                if name == "task-failed":
+                    raise RuntimeError(str(event))
+        except Exception as exc:
+            self._stream_error = str(exc)
+        finally:
+            if ws:
+                ws.close()

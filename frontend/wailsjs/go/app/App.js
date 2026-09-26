@@ -26,6 +26,50 @@ export function AudioTranscribe(arg1) {
   return window['go']['app']['App']['AudioTranscribe'](arg1);
 }
 
+export function AuthBootstrapAdmin(arg1, arg2) {
+  return window['go']['app']['App']['AuthBootstrapAdmin'](arg1, arg2);
+}
+
+export function AuthChangePassword(arg1, arg2) {
+  return window['go']['app']['App']['AuthChangePassword'](arg1, arg2);
+}
+
+export function AuthCreateUser(arg1, arg2) {
+  return window['go']['app']['App']['AuthCreateUser'](arg1, arg2);
+}
+
+export function AuthCurrent() {
+  return window['go']['app']['App']['AuthCurrent']();
+}
+
+export function AuthDeleteUser(arg1) {
+  return window['go']['app']['App']['AuthDeleteUser'](arg1);
+}
+
+export function AuthHasAdmin() {
+  return window['go']['app']['App']['AuthHasAdmin']();
+}
+
+export function AuthLogin(arg1, arg2) {
+  return window['go']['app']['App']['AuthLogin'](arg1, arg2);
+}
+
+export function AuthLogout() {
+  return window['go']['app']['App']['AuthLogout']();
+}
+
+export function AuthSetUserEnabled(arg1, arg2) {
+  return window['go']['app']['App']['AuthSetUserEnabled'](arg1, arg2);
+}
+
+export function AuthUsers() {
+  return window['go']['app']['App']['AuthUsers']();
+}
+
+export function CancelRequest(arg1) {
+  return window['go']['app']['App']['CancelRequest'](arg1);
+}
+
 export function CancelRunningTask() {
   return window['go']['app']['App']['CancelRunningTask']();
 }
@@ -34,16 +78,16 @@ export function ChatWithDeepSeek(arg1) {
   return window['go']['app']['App']['ChatWithDeepSeek'](arg1);
 }
 
-export function ChatWithDeepSeekStream(arg1) {
-  return window['go']['app']['App']['ChatWithDeepSeekStream'](arg1);
+export function ChatWithDeepSeekStream(arg1, arg2) {
+  return window['go']['app']['App']['ChatWithDeepSeekStream'](arg1, arg2);
 }
 
-export function ChatWithDeepSeekStreamWithContext(arg1) {
-  return window['go']['app']['App']['ChatWithDeepSeekStreamWithContext'](arg1);
+export function ChatWithDeepSeekStreamWithContext(arg1, arg2) {
+  return window['go']['app']['App']['ChatWithDeepSeekStreamWithContext'](arg1, arg2);
 }
 
-export function ChatWithScreenshot(arg1, arg2, arg3) {
-  return window['go']['app']['App']['ChatWithScreenshot'](arg1, arg2, arg3);
+export function ChatWithScreenshot(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['ChatWithScreenshot'](arg1, arg2, arg3, arg4);
 }
 
 export function ChatWithScreenshotSync(arg1, arg2, arg3) {
@@ -80,6 +124,10 @@ export function EmitEvent(arg1, arg2) {
 
 export function GenerateInterviewAnswer(arg1) {
   return window['go']['app']['App']['GenerateInterviewAnswer'](arg1);
+}
+
+export function GetAudioLevel() {
+  return window['go']['app']['App']['GetAudioLevel']();
 }
 
 export function GetDomainCategories() {

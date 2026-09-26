@@ -7,6 +7,7 @@ import { useChatStore } from '../chat'
 
 // Mock Wails runtime bindings
 vi.mock('../../../wailsjs/go/app/App', () => ({
+  CancelRequest: vi.fn(() => Promise.resolve(true)),
   ChatWithDeepSeek: vi.fn(() => Promise.resolve('mock answer')),
   ChatWithDeepSeekStream: vi.fn(() => Promise.resolve()),
   ChatWithScreenshot: vi.fn(() => Promise.resolve()),
@@ -38,6 +39,12 @@ function setupLocalStorage() {
 }
 
 describe('ChatStore', () => {
+  const requestId = 'test-request'
+
+  function startStream(store) {
+    store.beginRequest(requestId)
+  }
+
   beforeEach(() => {
     setActivePinia(createPinia())
     setupLocalStorage()
@@ -97,8 +104,8 @@ describe('ChatStore', () => {
 
   it('handleStreamChunk adds assistant message', () => {
     const store = useChatStore()
-    store.isLoading = true
-    store.handleStreamChunk('Hello')
+    startStream(store)
+    store.handleStreamChunk({ requestId, chunk: 'Hello' })
     expect(store.messages).toHaveLength(1)
     expect(store.messages[0].role).toBe('assistant')
     expect(store.messages[0]._streaming).toBe(true)
@@ -107,28 +114,59 @@ describe('ChatStore', () => {
 
   it('handleStreamChunk appends to existing content', () => {
     const store = useChatStore()
-    store.isLoading = true
-    store.handleStreamChunk('Hello')
-    store.handleStreamChunk(' World')
+    startStream(store)
+    store.handleStreamChunk({ requestId, chunk: 'Hello' })
+    store.handleStreamChunk({ requestId, chunk: ' World' })
     expect(store.messages[0].content).toBe('Hello World')
   })
 
   it('handleStreamDone ends streaming', () => {
     const store = useChatStore()
-    store.isLoading = true
-    store.handleStreamChunk('test')
-    store.handleStreamDone()
+    startStream(store)
+    store.handleStreamChunk({ requestId, chunk: 'test' })
+    store.handleStreamDone({ requestId })
     expect(store.isLoading).toBe(false)
     expect(store.messages[0]._streaming).toBeUndefined()
   })
 
   it('handleStreamError adds error to message', () => {
     const store = useChatStore()
-    store.isLoading = true
-    store.handleStreamChunk('partial')
-    store.handleStreamError('API timeout')
+    startStream(store)
+    store.handleStreamChunk({ requestId, chunk: 'partial' })
+    store.handleStreamError({ requestId, error: 'API timeout' })
     expect(store.messages[0].content).toContain('API timeout')
     expect(store.isLoading).toBe(false)
+  })
+
+  it('ignores stream events from a different request', () => {
+    const store = useChatStore()
+    startStream(store)
+    store.handleStreamChunk({ requestId: 'stale-request', chunk: 'stale' })
+    expect(store.messages).toEqual([])
+    expect(store.isLoading).toBe(true)
+  })
+
+  it('rejects invalid imports without changing messages', async () => {
+    const store = useChatStore()
+    store.addMessage('user', 'keep me')
+    const file = new File([
+      JSON.stringify({ version: 1, messages: [{ role: 'system', content: 'bad' }] }),
+    ], 'bad.json', { type: 'application/json' })
+
+    await expect(store.importHistory(file)).rejects.toThrow('消息角色无效')
+    expect(store.messages).toHaveLength(1)
+    expect(store.messages[0].content).toBe('keep me')
+  })
+
+  it('imports a validated versioned chat file atomically', async () => {
+    const store = useChatStore()
+    const file = new File([
+      JSON.stringify({ version: 1, messages: [{ role: 'user', content: 'hello' }] }),
+    ], 'chat.json', { type: 'application/json' })
+
+    await expect(store.importHistory(file)).resolves.toBe(1)
+    expect(store.messages[0]).toMatchObject({ role: 'user', content: 'hello' })
+    expect(store.messages[0].id).toBeTruthy()
   })
 
   it('does not send empty messages', async () => {
@@ -140,7 +178,7 @@ describe('ChatStore', () => {
 
   it('does not double-send while loading', async () => {
     const store = useChatStore()
-    store.isLoading = true
+    startStream(store)
     await store.sendMessage('hello')
     expect(store.messages).toHaveLength(0)
   })

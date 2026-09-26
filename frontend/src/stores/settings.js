@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { reactive, ref, computed, watch } from 'vue'
+import { reactive, ref, computed, watch, onScopeDispose } from 'vue'
 import { api } from '../services/api'
 import { useUIStore } from './ui'
 import { currentTheme, setTheme } from '../services/theme'
@@ -9,6 +9,7 @@ export const useSettingsStore = defineStore('settings', () => {
 
   const settings = reactive({
     apiKey: '',
+    apiKeyConfigured: false,
     baseURL: 'https://api.openai.com/v1',
     model: '',
     assistantModel: '',
@@ -29,6 +30,11 @@ export const useSettingsStore = defineStore('settings', () => {
     sttLanguage: 'zh',
     sttSensitivity: 0.5,
     sttService: 'qwen',
+    answerLength: 'standard',
+    answerStyle: 'natural',
+    answerStructure: 'free',
+    answerDuration: '1m',
+    includeTechnicalDetails: true,
   })
 
   const tempSettings = reactive({ ...settings })
@@ -37,6 +43,7 @@ export const useSettingsStore = defineStore('settings', () => {
   const domainCategories = ref([])
   const resumeRawContent = ref('')
   const isResumeParsing = ref(false)
+  const apiKeyChanged = ref(false)
 
   const isMacOS = ref(
     typeof navigator !== 'undefined' &&
@@ -60,11 +67,7 @@ export const useSettingsStore = defineStore('settings', () => {
     { action: 'scroll_down', label: '向下滚动', default: 'Alt+PgDn', macDefault: 'Cmd+Option+Shift+Down' },
   ]
 
-  const maskedKey = computed(() => {
-    if (!settings.apiKey) return ''
-    if (settings.apiKey.length < 8) return settings.apiKey
-    return settings.apiKey.substring(0, 3) + '****' + settings.apiKey.substring(settings.apiKey.length - 4)
-  })
+  const maskedKey = computed(() => (settings.apiKeyConfigured ? '已安全保存' : ''))
 
   const solveShortcut = computed(() => shortcuts.screenshot?.keyName || shortcuts.solve?.keyName || 'F8')
   const sendShortcut = computed(() => shortcuts.send?.keyName || 'Ctrl+J')
@@ -75,7 +78,7 @@ export const useSettingsStore = defineStore('settings', () => {
   const statusIcon = ref('●')
 
   function resetStatus() {
-    if (!settings.apiKey) {
+    if (!settings.apiKeyConfigured && !settings.apiKey) {
       statusText.value = '未配置'
       statusIcon.value = '!'
     } else {
@@ -90,10 +93,22 @@ export const useSettingsStore = defineStore('settings', () => {
     applyTransparency(1.0 - newVal)
   })
 
-  window.addEventListener('theme-changed', () => {
-    requestAnimationFrame(() => {
+  let themeFrame = null
+  const handleThemeChanged = () => {
+    if (themeFrame !== null) cancelAnimationFrame(themeFrame)
+    themeFrame = requestAnimationFrame(() => {
+      themeFrame = null
       applyTransparency(1.0 - (tempSettings.transparency ?? 0))
     })
+  }
+  if (typeof window !== 'undefined') {
+    window.addEventListener('theme-changed', handleThemeChanged)
+  }
+  onScopeDispose(() => {
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('theme-changed', handleThemeChanged)
+    }
+    if (themeFrame !== null) cancelAnimationFrame(themeFrame)
   })
 
   watch(() => resumeRawContent.value, (newVal) => {
@@ -158,8 +173,8 @@ export const useSettingsStore = defineStore('settings', () => {
       applyConfig(backendConfig)
       if (backendConfig.shortcuts) Object.assign(shortcuts, backendConfig.shortcuts)
       if (backendConfig.theme) setTheme(backendConfig.theme)
-      if (settings.apiKey && (!settings.model || settings.model === 'auto')) {
-        await fetchModels(settings.apiKey)
+      if (settings.apiKeyConfigured && (!settings.model || settings.model === 'auto')) {
+        await fetchModels('')
         if (ui.availableModels.length > 0 && !settings.model) {
           settings.model = ui.availableModels[0]
           tempSettings.model = ui.availableModels[0]
@@ -171,7 +186,8 @@ export const useSettingsStore = defineStore('settings', () => {
   }
 
   function applyConfig(config) {
-    settings.apiKey = config.apiKey || ''
+    settings.apiKeyConfigured = !!config.apiKeyConfigured
+    settings.apiKey = ''
     settings.baseURL = config.baseURL || 'https://api.openai.com/v1'
     settings.model = config.model || ''
     settings.assistantModel = config.assistantModel || ''
@@ -191,6 +207,11 @@ export const useSettingsStore = defineStore('settings', () => {
     settings.sttLanguage = config.sttLanguage || 'zh'
     settings.sttSensitivity = config.sttSensitivity !== undefined ? config.sttSensitivity : 0.5
     settings.sttService = config.sttService || 'qwen'
+    settings.answerLength = config.answerLength || 'standard'
+    settings.answerStyle = config.answerStyle || 'natural'
+    settings.answerStructure = config.answerStructure || 'free'
+    settings.answerDuration = config.answerDuration || '1m'
+    settings.includeTechnicalDetails = config.includeTechnicalDetails !== false
 
     const opacity = config.opacity !== undefined ? config.opacity : 1.0
     settings.transparency = 1.0 - opacity
@@ -230,7 +251,7 @@ export const useSettingsStore = defineStore('settings', () => {
   }
 
   async function refreshModels() {
-    if (!tempSettings.apiKey) {
+    if (!tempSettings.apiKey && !settings.apiKeyConfigured) {
       ui.showToast('请先填写 API Key', 'warning')
       return
     }
@@ -266,9 +287,8 @@ export const useSettingsStore = defineStore('settings', () => {
     }
   }
 
-  function buildConfigToSave(sourceSettings, sourceShortcuts) {
-    return {
-      apiKey: sourceSettings.apiKey,
+  function buildConfigToSave(sourceSettings, sourceShortcuts, includeAPIKey = false) {
+    const config = {
       baseURL: sourceSettings.baseURL,
       model: sourceSettings.model,
       assistantModel: sourceSettings.assistantModel,
@@ -289,14 +309,21 @@ export const useSettingsStore = defineStore('settings', () => {
       sttLanguage: sourceSettings.sttLanguage,
       sttSensitivity: sourceSettings.sttSensitivity,
       sttService: sourceSettings.sttService,
+      answerLength: sourceSettings.answerLength,
+      answerStyle: sourceSettings.answerStyle,
+      answerStructure: sourceSettings.answerStructure,
+      answerDuration: sourceSettings.answerDuration,
+      includeTechnicalDetails: sourceSettings.includeTechnicalDetails,
       shortcuts: sourceShortcuts,
       theme: currentTheme.value,
     }
+    if (includeAPIKey) config.apiKey = sourceSettings.apiKey
+    return config
   }
 
   async function saveSettings() {
     try {
-      if (!tempSettings.model && tempSettings.apiKey) {
+      if (!tempSettings.model && (tempSettings.apiKey || settings.apiKeyConfigured)) {
         ui.showToast('正在自动获取模型...', 'info')
         await fetchModels(tempSettings.apiKey)
         if (!tempSettings.model && ui.availableModels.length > 0) {
@@ -306,12 +333,19 @@ export const useSettingsStore = defineStore('settings', () => {
 
       Object.assign(shortcuts, JSON.parse(JSON.stringify(tempShortcuts)))
 
-      const err = await api.syncSettings(JSON.stringify(buildConfigToSave(tempSettings, tempShortcuts)))
+      const err = await api.syncSettings(JSON.stringify(buildConfigToSave(tempSettings, tempShortcuts, apiKeyChanged.value)))
       if (err) {
         ui.showToast(err, 'error')
       } else {
         ui.showToast('设置已保存', 'success')
+        const keyWasChanged = apiKeyChanged.value
+        const keyIsConfigured = keyWasChanged ? tempSettings.apiKey.length > 0 : settings.apiKeyConfigured
         Object.assign(settings, tempSettings)
+        settings.apiKey = ''
+        settings.apiKeyConfigured = keyIsConfigured
+        tempSettings.apiKey = ''
+        tempSettings.apiKeyConfigured = keyIsConfigured
+        apiKeyChanged.value = false
         resetStatus()
         closeSettings()
       }
@@ -324,11 +358,13 @@ export const useSettingsStore = defineStore('settings', () => {
   function openSettings() {
     api.restoreFocus()
     Object.assign(tempSettings, JSON.parse(JSON.stringify(settings)))
+    tempSettings.apiKey = ''
+    apiKeyChanged.value = false
     Object.assign(tempShortcuts, JSON.parse(JSON.stringify(shortcuts)))
     ui.connectionStatus = null
     if (settings.resumeContent) resumeRawContent.value = settings.resumeContent
-    if (settings.apiKey && ui.availableModels.length === 0) {
-      fetchModels(settings.apiKey)
+    if (settings.apiKeyConfigured && ui.availableModels.length === 0) {
+      fetchModels('')
     }
     ui.showSettings = true
   }
@@ -344,6 +380,16 @@ export const useSettingsStore = defineStore('settings', () => {
     recordingAction.value = null
     recordingText.value = ''
     resetTempSettings()
+  }
+
+  function clearAPIKey() {
+    tempSettings.apiKey = ''
+    apiKeyChanged.value = true
+  }
+
+  function setAPIKey(value) {
+    tempSettings.apiKey = value
+    apiKeyChanged.value = true
   }
 
   function resetTempSettings() {
@@ -408,7 +454,7 @@ export const useSettingsStore = defineStore('settings', () => {
     maskedKey, solveShortcut, sendShortcut, deleteShortcut, toggleShortcut,
     statusText, statusIcon, resetStatus,
     loadSettings, fetchModels, refreshModels, testConnection,
-    saveSettings, saveSettingsSilent, openSettings, closeSettings, resetTempSettings,
+    saveSettings, saveSettingsSilent, openSettings, closeSettings, resetTempSettings, setAPIKey, clearAPIKey,
     recordKey, selectResume, clearResume, parseResume,
     applyTransparency,
   }

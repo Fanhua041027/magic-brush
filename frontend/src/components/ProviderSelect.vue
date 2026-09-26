@@ -77,10 +77,11 @@
             type="password"
             :value="apiKey"
             @input="emit('update:apiKey', $event.target.value)"
-            :placeholder="selectedProviderCode === 'custom' ? '请输入你的 API Key' : `请输入 ${selectedProviderName} 的 API Key`"
+            :placeholder="apiKeyConfigured ? '已安全保存；输入新密钥可替换，留空保持不变' : (selectedProviderCode === 'custom' ? '请输入你的 API Key' : `请输入 ${selectedProviderName} 的 API Key`)"
             class="text-input"
           />
         </div>
+        <button v-if="apiKeyConfigured && !apiKey" type="button" class="clear-key-button" @click="emit('clear-api-key')">清除已保存密钥</button>
       </div>
     </section>
 
@@ -127,10 +128,11 @@ import {
 
 const props = defineProps({
   apiKey: { type: String, default: '' },
+  apiKeyConfigured: { type: Boolean, default: false },
   baseURL: { type: String, default: '' },
 })
 
-const emit = defineEmits(['update:apiKey', 'update:baseURL'])
+const emit = defineEmits(['update:apiKey', 'update:baseURL', 'clear-api-key'])
 
 const isOpen = ref(false)
 const selectRef = ref(null)
@@ -166,7 +168,7 @@ const selectedProviderDescription = computed(() => {
   }
   return descriptions[selectedProviderCode.value] || '通过 OpenAI-compatible 接口接入你的模型服务。'
 })
-const isReady = computed(() => !!props.apiKey && (selectedProviderCode.value !== 'custom' || !!props.baseURL))
+const isReady = computed(() => (!!props.apiKey || props.apiKeyConfigured) && (selectedProviderCode.value !== 'custom' || !!props.baseURL))
 
 watch(() => props.baseURL, (newBaseURL) => {
   const normalized = (newBaseURL || '').trim()
@@ -430,6 +432,16 @@ onUnmounted(() => {
 }
 
 .text-input::placeholder { color: var(--text-muted); }
+
+.clear-key-button {
+  align-self: flex-start;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--color-error);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
 
 .field-hint {
   margin: 0;

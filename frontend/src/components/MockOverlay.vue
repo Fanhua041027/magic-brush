@@ -100,8 +100,10 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import Icon from './Icon.vue'
 import { api } from '../services/api'
 import { on } from '../services/events'
+import { useChatStore } from '../stores/chat'
 
 const emit = defineEmits(['close'])
+const chatStore = useChatStore()
 
 // State
 const isListening = ref(false)
@@ -116,6 +118,10 @@ const audioLevel = ref(0)
 
 let levelPollTimer = null
 let smoothLevel = 0
+let disposePipelineEvent = null
+let disposed = false
+let operationGeneration = 0
+let levelPollInFlight = false
 
 const statusText = computed(() => {
   if (isProcessing.value) return '正在处理...'
@@ -134,13 +140,14 @@ const statusClass = computed(() => {
 
 // Load available audio devices on mount
 onMounted(async () => {
+  const generation = operationGeneration
   try {
     const result = await api.audioListDevices()
+    if (disposed || generation !== operationGeneration) return
     if (result) {
       const parsed = typeof result === 'string' ? JSON.parse(result) : result
       if (Array.isArray(parsed)) {
         audioDevices.value = parsed
-        // Select stereo mix by default
         const stereoMix = parsed.find(d => d.type === 'stereo_mix')
         if (stereoMix) audioDeviceId.value = stereoMix.index
         else if (parsed.length > 0) audioDeviceId.value = parsed[0].index
@@ -148,20 +155,28 @@ onMounted(async () => {
     }
   } catch (_) {}
 
-  // Poll audio level
+  if (disposed || generation !== operationGeneration) return
   levelPollTimer = setInterval(async () => {
+    if (disposed || levelPollInFlight) return
+    levelPollInFlight = true
     try {
       const resp = await api.audioLevel()
-      if (resp && typeof resp.level === 'number') {
+      if (!disposed && resp && typeof resp.level === 'number') {
         smoothLevel = smoothLevel * 0.3 + resp.level * 0.7
         audioLevel.value = smoothLevel
       }
-    } catch {}
+    } catch {
+      // Ignore transient level polling errors.
+    } finally {
+      levelPollInFlight = false
+    }
   }, 200)
+
+  disposePipelineEvent = on('pipeline-event', handlePipelineEvent)
 })
 
-// Listen for pipeline events
-on('pipeline-event', (eventStr) => {
+function handlePipelineEvent(eventStr) {
+  if (disposed || typeof eventStr !== 'string') return
   const parts = eventStr.split('|')
   if (parts.length >= 2) {
     pipelineEvents.value.unshift({
@@ -173,9 +188,15 @@ on('pipeline-event', (eventStr) => {
       pipelineEvents.value = pipelineEvents.value.slice(0, 10)
     }
   }
-})
+}
+
+function isCurrentOperation(generation) {
+  return !disposed && generation === operationGeneration
+}
 
 async function toggleListen() {
+  if (disposed) return
+  const generation = ++operationGeneration
   if (isListening.value) {
     // Stop listening and process
     isListening.value = false
@@ -197,10 +218,12 @@ async function toggleListen() {
           }
         }
       }
+      if (!isCurrentOperation(generation)) return
       if (deviceId == null) deviceId = 25 // fallback
 
       // Capture system audio (8 seconds)
       const captureResult = await api.audioCapture(deviceId, 8)
+      if (!isCurrentOperation(generation)) return
       if (!captureResult) throw new Error('音频捕获失败')
 
       const capture = typeof captureResult === 'string' ? JSON.parse(captureResult) : captureResult
@@ -211,6 +234,7 @@ async function toggleListen() {
 
       // Transcribe
       const transcribeResult = await api.audioTranscribe(capture.base64)
+      if (!isCurrentOperation(generation)) return
       if (!transcribeResult) throw new Error('转录失败')
 
       const transcribe = typeof transcribeResult === 'string' ? JSON.parse(transcribeResult) : transcribeResult
@@ -220,11 +244,20 @@ async function toggleListen() {
       }
 
       transcribedText.value = transcribe.text
+      // 同时通知当前 WebView，并更新共享草稿；兼容不同窗口/挂载方式。
+      chatStore.setDraftText(transcribe.text)
+      try {
+        localStorage.setItem('magic-brush-stt-draft', transcribe.text)
+        window.dispatchEvent(new CustomEvent('mock-stt-transcribed', {
+          detail: transcribe.text,
+        }))
+      } catch (_) {}
 
       pipelineEvents.value.unshift({ stage: 'answer', status: 'running', detail: '生成回答...' })
 
       // Generate answer - ChatWithDeepSeek returns plain text, not JSON
       const answerResult = await api.generateInterviewAnswer(transcribe.text)
+      if (!isCurrentOperation(generation)) return
       if (answerResult) {
         try {
           const parsed = JSON.parse(answerResult)
@@ -242,6 +275,7 @@ async function toggleListen() {
       pipelineEvents.value.unshift({ stage: 'complete', status: 'done', detail: '完成' })
 
     } catch (e) {
+      if (!isCurrentOperation(generation)) return
       transcribedText.value = ''
       answerText.value = ''
       const errMsg = e.message || '处理失败'
@@ -251,7 +285,7 @@ async function toggleListen() {
         detail: errMsg,
       })
     } finally {
-      isProcessing.value = false
+      if (isCurrentOperation(generation)) isProcessing.value = false
     }
   } else {
     // Start listening
@@ -285,8 +319,13 @@ function reset() {
 }
 
 onUnmounted(() => {
+  disposed = true
+  operationGeneration++
   if (listenTimer.value) clearTimeout(listenTimer.value)
   if (levelPollTimer) clearInterval(levelPollTimer)
+  levelPollTimer = null
+  disposePipelineEvent?.()
+  disposePipelineEvent = null
 })
 </script>
 

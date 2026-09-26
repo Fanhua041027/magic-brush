@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"sync"
 )
 
 // MaxConversationRounds is the maximum number of conversation rounds to keep.
@@ -19,12 +20,14 @@ type Callbacks struct {
 
 type Request struct {
 	Config      config.Config
+	Provider    llm.Provider // optional request-specific provider
 	Screenshots []string
 	UserMessage string // optional text from STT or typed input
 	KBContext   string // optional knowledge base context
 }
 
 type Solver struct {
+	mu          sync.RWMutex
 	llmProvider llm.Provider
 	chatHistory []llm.Message
 }
@@ -37,11 +40,15 @@ func NewSolver(provider llm.Provider) *Solver {
 }
 
 func (s *Solver) SetProvider(provider llm.Provider) {
+	s.mu.Lock()
 	s.llmProvider = provider
+	s.mu.Unlock()
 }
 
 func (s *Solver) ClearHistory() {
+	s.mu.Lock()
 	s.chatHistory = make([]llm.Message, 0)
+	s.mu.Unlock()
 }
 
 func (s *Solver) Solve(ctx context.Context, req Request, cb Callbacks) bool {
@@ -82,7 +89,7 @@ func (s *Solver) Solve(ctx context.Context, req Request, cb Callbacks) bool {
 		systemPrompt.WriteString("\n</KnowledgeBase>\n")
 	}
 
-	logger.Println("system 提示词:", systemPrompt.String())
+	logger.Printf("system 提示词已构建 (长度: %d)", systemPrompt.Len())
 
 	userParts := make([]llm.ContentPart, 0, len(req.Screenshots)+1)
 	if req.UserMessage != "" {
@@ -101,7 +108,20 @@ func (s *Solver) Solve(ctx context.Context, req Request, cb Callbacks) bool {
 		cb.EmitEvent("solution-stream-start")
 	}
 
-	response, err := s.llmProvider.GenerateContentStream(ctx, messagesToSend, func(chunk llm.StreamChunk) {
+	provider := req.Provider
+	if provider == nil {
+		s.mu.RLock()
+		provider = s.llmProvider
+		s.mu.RUnlock()
+	}
+	if provider == nil {
+		if cb.EmitEvent != nil {
+			cb.EmitEvent("solution-error", "未配置模型服务")
+		}
+		return false
+	}
+
+	response, err := provider.GenerateContentStream(ctx, messagesToSend, func(chunk llm.StreamChunk) {
 		if cb.EmitEvent == nil {
 			return
 		}
@@ -123,16 +143,14 @@ func (s *Solver) Solve(ctx context.Context, req Request, cb Callbacks) bool {
 			return false
 		}
 
-		logger.Printf("LLM 请求失败: %v\n", err)
+		logger.Printf("LLM 请求失败")
 		if cb.EmitEvent != nil {
-			cb.EmitEvent("solution-error", err.Error())
+			cb.EmitEvent("solution-error", "模型请求失败，请检查配置或稍后重试")
 		}
 		return false
 	}
 
-	logger.Printf("[解题] 模型返回内容长度: %d", len(response.Content))
-	logger.Printf("[解题] 模型返回内容: %s", response.Content)
-	logger.Printf("[解题] 模型返回思考链长度: %d", len(response.Thinking))
+	logger.Printf("[解题] 模型响应长度: %d, 思考链长度: %d", len(response.Content), len(response.Thinking))
 
 	if response.Content == "" && response.Thinking == "" {
 		logger.Println("[解题] 警告: 模型返回内容为空")
@@ -146,7 +164,9 @@ func (s *Solver) Solve(ctx context.Context, req Request, cb Callbacks) bool {
 		cb.EmitEvent("solution", response.Content)
 	}
 
+	s.mu.Lock()
 	s.chatHistory = []llm.Message{}
+	s.mu.Unlock()
 	return true
 }
 

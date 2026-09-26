@@ -113,7 +113,6 @@ import { ref, computed } from 'vue'
 import { useSolutionStore } from '../stores/solution'
 import { useSettingsStore } from '../stores/settings'
 import { useUIStore } from '../stores/ui'
-import { StopThinking } from '../../wailsjs/go/app/App'
 import Icon from './Icon.vue'
 import HistoryItem from './HistoryItem.vue'
 import EmptyState from './EmptyState.vue'
@@ -132,10 +131,7 @@ const isHistoryCollapsed = ref(false)
 // Cancel thinking
 async function cancelThinking() {
   try {
-    await StopThinking()
-    solution.isThinking = false
-    solution.isLoading = false
-    solution.isAppending = false
+    await solution.cancelActiveRequest()
   } catch (error) {
     console.error('Cancel thinking error:', error)
   }

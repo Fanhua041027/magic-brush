@@ -6,7 +6,9 @@
 
   <!-- 正常主窗口模式 -->
   <template v-else>
-    <TopBar @openSettings="settingsStore.openSettings" />
+    <AuthGate v-if="showLogin" @authenticated="onAuthenticated" @close="showLogin = false" />
+    <AdminPanel v-if="showAdminPanel" :user="currentUser" @close="showAdminPanel = false" />
+    <TopBar :authenticated="authenticated" :current-user="currentUser" @openSettings="settingsStore.openSettings" @openLogin="openLogin" @openAdmin="showAdminPanel = true" />
 
     <WelcomeView v-if="!ui.hasStarted && solution.history.length === 0" />
     <SolveView v-else />
@@ -63,7 +65,7 @@
 </template>
 
 <script setup>
-import { onMounted, ref } from 'vue'
+import { onMounted, onUnmounted, ref } from 'vue'
 import TopBar from './components/TopBar.vue'
 import WelcomeView from './components/WelcomeView.vue'
 import SolveView from './components/SolveView.vue'
@@ -77,6 +79,8 @@ import ScreenshotFollowUp from './components/ScreenshotFollowUp.vue'
 import TutorialWizard from './components/TutorialWizard.vue'
 import StandaloneInterviewPanel from './components/StandaloneInterviewPanel.vue'
 import MockOverlay from './components/MockOverlay.vue'
+import AuthGate from './components/AuthGate.vue'
+import AdminPanel from './components/AdminPanel.vue'
 
 import { useUIStore } from './stores/ui'
 import { useSettingsStore } from './stores/settings'
@@ -86,7 +90,6 @@ import { useChatStore } from './stores/chat'
 import { useTutorialStore } from './stores/tutorial'
 import { on } from './services/events'
 import { api } from './services/api'
-import { wsService } from './services/websocket'
 import { initCodeBlockInteractions } from './utils/markdown-latex'
 
 const ui = useUIStore()
@@ -97,11 +100,31 @@ const chatStore = useChatStore()
 const tutorial = useTutorialStore()
 
 const isStandalone = ref(false)
+const authenticated = ref(false)
+const showLogin = ref(false)
+const currentUser = ref(null)
+const showAdminPanel = ref(false)
+function openLogin() { showLogin.value = true; console.log('[Auth] login dialog opened') }
+function onAuthenticated(user) { currentUser.value = user; authenticated.value = true; showLogin.value = false }
+async function logout() { const { AuthLogout } = await import('../wailsjs/go/app/App'); await AuthLogout(); authenticated.value = false; currentUser.value = null; showAdminPanel.value = false }
 const showListenAssistant = ref(false)
 
 const followUpRef = ref(null)
 let pendingSolveCallback = null
 let currentScreenshot = null
+let disposeCodeInteractions = null
+let disposeWindowListeners = null
+let disposeEvents = null
+const activeTimers = new Set()
+
+function schedule(fn, delay) {
+  const timer = setTimeout(() => {
+    activeTimers.delete(timer)
+    fn()
+  }, delay)
+  activeTimers.add(timer)
+  return timer
+}
 
 function toastIcon(type) {
   if (type === 'error') return 'x-circle'
@@ -127,6 +150,15 @@ function onKBSelect(item) {
   console.log('KB selected:', item)
 }
 
+onUnmounted(() => {
+  disposeEvents?.()
+  disposeWindowListeners?.()
+  activeTimers.forEach(timer => clearTimeout(timer))
+  activeTimers.clear()
+  pendingSolveCallback = null
+  currentScreenshot = null
+})
+
 onMounted(async () => {
   // 检测是否为独立面试窗口模式
   try {
@@ -137,45 +169,40 @@ onMounted(async () => {
     }
   } catch (e) { /* ignore */ }
 
-  initCodeBlockInteractions()
+  disposeCodeInteractions = initCodeBlockInteractions() || null
 
-  // 初始化 WebSocket 连接
-  wsService.connect()
-  wsService.startHeartbeat()
+  try {
+    const user = await api.getCurrentUser()
+    if (user) {
+      currentUser.value = user
+      authenticated.value = true
+    }
+  } catch (e) {
+    console.warn('[Auth] failed to restore session')
+  }
 
-  // 监听 WebSocket 事件
-  wsService.on('stt-streaming', (text) => {
-    window.dispatchEvent(new CustomEvent('stt-streaming-text', { detail: text }))
-  })
-
-  wsService.on('error', (error) => {
-    console.error('[App] WebSocket error:', error)
-    // 不显示错误提示，避免频繁弹出
-    // WebSocket 会自动重连
-  })
-
-  wsService.on('connected', () => {
-    console.log('[App] WebSocket connected')
-  })
-
-  wsService.on('disconnected', () => {
-    console.log('[App] WebSocket disconnected')
-  })
+  // STT 流式结果统一由 Wails 事件转发。
 
   api.getInitStatus().then(s => { ui.initStatus = s })
-  on('init-status', (s) => { ui.initStatus = s })
+  const eventDisposers = []
+  const subscribe = (event, handler) => {
+    const dispose = on(event, handler)
+    eventDisposers.push(dispose)
+    return dispose
+  }
+  subscribe('init-status', (s) => { ui.initStatus = s })
 
   settingsStore.loadSettings().then(() => {
     settingsStore.resetStatus()
     // 首次启动显示教程
-    setTimeout(() => {
+    schedule(() => {
       if (!tutorial.allCompleted) {
         tutorial.show()
       }
     }, 800)
   })
 
-  on('key-recorded', (data) => {
+  subscribe('key-recorded', (data) => {
     if (data && data.action) {
       if (settingsStore.tempShortcuts[data.action]) {
         settingsStore.tempShortcuts[data.action].keyName = data.keyName
@@ -189,7 +216,7 @@ onMounted(async () => {
     }
   })
 
-  on('shortcut-error', async (msg) => {
+  subscribe('shortcut-error', async (msg) => {
     ui.showToast(msg, 'error', 2000)
     const targetAction = settingsStore.recordingAction
     settingsStore.recordingAction = null
@@ -207,19 +234,22 @@ onMounted(async () => {
     }
   })
 
-  on('shortcut-saved', (action) => {
+  subscribe('shortcut-saved', (action) => {
     if (settingsStore.recordingAction === action) {
       settingsStore.recordingAction = null
       ui.showToast('快捷键已保存', 'success')
     }
   })
 
-  on('user-message', (screenshot) => {
-    solution.setUserScreenshot(screenshot)
-    currentScreenshot = screenshot
+  subscribe('user-message', (payload) => {
+    if (!payload || !solution.isActiveRequest(payload.requestId)) return
+    solution.setUserScreenshot(payload.screenshot)
+    currentScreenshot = payload.screenshot
   })
 
-  on('start-solving', () => {
+  subscribe('start-solving', (payload) => {
+    if (!payload?.requestId) return
+    solution.beginRequest(payload.requestId)
     const s = settingsStore.settings
     if (s.resumePath && !s.resumeContent) {
       pendingSolveCallback = proceedWithSolve
@@ -240,7 +270,7 @@ onMounted(async () => {
     if (s.keepContext && solution.history.length > 0 && solution.activeHistoryIndex === 0) {
       solution.isLoading = false
       solution.isAppending = true
-      setTimeout(() => {
+      schedule(() => {
         const el = document.getElementById('content')
         if (el) el.scrollTop = el.scrollHeight
       }, 50)
@@ -250,56 +280,59 @@ onMounted(async () => {
     }
   }
 
-  on('toggle-visibility', (isVisibleToCapture) => {
+  subscribe('toggle-visibility', (isVisibleToCapture) => {
     ui.flash('toggle')
     ui.isStealthMode = isVisibleToCapture
     ui.showToast(isVisibleToCapture ? '隐身模式已开启' : '隐身模式已关闭', isVisibleToCapture ? 'info' : 'success')
   })
 
-  on('solution', (data) => {
+  subscribe('solution', (payload) => {
+    if (!payload || !solution.isActiveRequest(payload.requestId)) return
+    const data = payload.content || ''
     settingsStore.statusText = '解题完成'
     settingsStore.statusIcon = '✓'
-    solution.handleSolution(data)
-    // 解题完成后显示追问对话框
-    console.log('[App] Solution event received, currentScreenshot:', !!currentScreenshot, 'followUpRef:', !!followUpRef.value)
-    if (currentScreenshot && followUpRef.value) {
-      setTimeout(() => {
-        // 传递解题结果作为上下文
-        const context = typeof data === 'string' ? data : (data?.content || JSON.stringify(data))
-        console.log('[App] Showing follow-up dialog...')
-        followUpRef.value.show(currentScreenshot, context, context)
-        currentScreenshot = null
+    if (!solution.handleSolution(payload)) return
+    const completedScreenshot = currentScreenshot
+    currentScreenshot = null
+    if (completedScreenshot && followUpRef.value) {
+      schedule(() => {
+        const context = data
+        followUpRef.value?.show(completedScreenshot, context, context)
       }, 500)
     }
   })
 
-  on('copy-code', () => {
+  subscribe('copy-code', () => {
     const old = settingsStore.statusText
     settingsStore.statusText = '已复制'
-    setTimeout(() => (settingsStore.statusText = old), 2000)
+    schedule(() => (settingsStore.statusText = old), 2000)
   })
 
-  on('click-through-state', (enabled) => {
+  subscribe('click-through-state', (enabled) => {
     ui.isClickThrough = enabled
     const el = document.getElementById('main-interface')
     if (el) el.style.pointerEvents = enabled ? 'none' : 'auto'
   })
 
-  on('scroll-content', (direction) => {
+  subscribe('scroll-content', (direction) => {
     const el = document.getElementById('content')
     if (!el) return
     el.scrollBy({ top: direction === 'up' ? -50 : 50, behavior: 'smooth' })
   })
 
-  on('solution-stream-start', () => {
+  subscribe('solution-stream-start', (payload) => {
+    if (!payload || !solution.isActiveRequest(payload.requestId)) return
     ui.hasStarted = true
-    solution.handleStreamStart(settingsStore.settings.keepContext)
+    solution.handleStreamStart(payload, settingsStore.settings.keepContext)
   })
 
-  on('solution-stream-chunk', (token) => solution.handleStreamChunk(token))
-  on('solution-stream-thinking', (token) => solution.handleThinkingChunk(token))
+  subscribe('solution-stream-chunk', (payload) => solution.handleStreamChunk(payload))
+  subscribe('solution-stream-thinking', (payload) => solution.handleThinkingChunk(payload))
 
-  on('solution-error', (rawErrMsg) => {
+  subscribe('solution-error', (payload) => {
+    if (!payload || !solution.isActiveRequest(payload.requestId)) return
+    const rawErrMsg = payload.error || '未知错误'
+    solution.endRequest(payload.requestId)
     if (rawErrMsg && (rawErrMsg.includes('context canceled') || rawErrMsg.includes('canceled'))) {
       handleUserCancellation()
       return
@@ -335,79 +368,79 @@ onMounted(async () => {
       } else {
         if (current.rounds?.length) current.rounds[0].aiResponse = ''
         solution.setStreamBuffer('')
-        solution.isLoading = true
-        settingsStore.statusText = '正在思考...'
+        solution.isLoading = false
+        settingsStore.statusText = '已停止'
         settingsStore.statusIcon = '...'
         solution.shouldOverwriteHistory = true
       }
     }
   }
 
-  on('stt-recording-started', () => {
+  subscribe('stt-recording-started', () => {
     voice.isRecording = true
     voice.transcribedText = ''
+    chatStore.setDraftText('')
     // 触发自定义事件
     window.dispatchEvent(new CustomEvent('stt-recording-started'))
   })
 
-  on('stt-transcribed', (text) => {
+  subscribe('stt-transcribed', (text) => {
     voice.isRecording = false
     voice.transcribedText = text || ''
-    // 触发自定义事件
-    window.dispatchEvent(new CustomEvent('stt-transcribed', { detail: text }))
-    // 语音转写后：如果对话框已打开则填入输入框，不自动打开新对话
     if (text && text.trim()) {
-      // 不再自动调用 chatStore.show()
-      // 仅在对话框已打开时填入输入框（由 ChatDialog 的 stt-transcribed 监听处理）
+      chatStore.setDraftText(text)
+      try { localStorage.setItem('magic-brush-stt-draft', text.trim()) } catch (_) {}
     }
+    window.dispatchEvent(new CustomEvent('stt-transcribed', { detail: text }))
   })
 
-  on('stt-recording-stopped', () => {
+  subscribe('stt-recording-stopped', () => {
     voice.isRecording = false
     // 触发自定义事件
     window.dispatchEvent(new CustomEvent('stt-recording-stopped'))
   })
 
-  on('stt-streaming-text', (text) => {
+  subscribe('stt-streaming-text', (text) => {
     // 触发流式转写事件
     window.dispatchEvent(new CustomEvent('stt-streaming-text', { detail: text }))
   })
 
-  on('require-api-key', () => {
+  subscribe('require-api-key', () => {
     if (!ui.showSettings) settingsStore.openSettings()
     ui.activeTab = 'api'
     ui.showToast('请先配置 API Key', 'warning')
   })
 
-  on('open-settings', (tab) => {
+  subscribe('open-settings', (tab) => {
     if (!ui.showSettings) settingsStore.openSettings()
     if (tab) ui.activeTab = tab
   })
 
-  on('toast', (msg) => {
+  subscribe('toast', (msg) => {
     ui.showToast(msg)
   })
 
   // 追问对话中的截图支持
-  window.addEventListener('followup-screenshot', () => {
-    // 触发截图
+  const handleFollowupScreenshot = () => {
     api.triggerScreenshot().then((screenshotData) => {
       if (screenshotData) {
         window.dispatchEvent(new CustomEvent('followup-screenshot-taken', { detail: screenshotData }))
       }
     })
-  })
+  }
+  window.addEventListener('followup-screenshot', handleFollowupScreenshot)
 
-  on('open-chat', () => {
+  subscribe('open-chat', () => {
     chatStore.show()
   })
 
   // 聆听助手
-  window.addEventListener('open-mock-overlay', () => {
+  const handleOpenMockOverlay = () => {
     showListenAssistant.value = true
-  })
+  }
+  window.addEventListener('open-mock-overlay', handleOpenMockOverlay)
 
-  document.addEventListener('keydown', event => {
+  const handleDevtoolsKeydown = event => {
     if (
       event.key === 'F12' ||
       (event.ctrlKey && event.shiftKey && event.key === 'I') ||
@@ -416,7 +449,19 @@ onMounted(async () => {
     ) {
       event.preventDefault()
     }
-  })
+  }
+  document.addEventListener('keydown', handleDevtoolsKeydown)
+
+  disposeEvents = () => {
+    eventDisposers.splice(0).forEach(dispose => dispose?.())
+    disposeEvents = null
+  }
+  disposeWindowListeners = () => {
+    window.removeEventListener('followup-screenshot', handleFollowupScreenshot)
+    window.removeEventListener('open-mock-overlay', handleOpenMockOverlay)
+    document.removeEventListener('keydown', handleDevtoolsKeydown)
+    disposeWindowListeners = null
+  }
 })
 </script>
 
@@ -507,6 +552,9 @@ onMounted(async () => {
 .overlay-fade-leave-to { opacity: 0; }
 .overlay-fade-enter-from .warn-dialog,
 .overlay-fade-leave-to .warn-dialog { transform: scale(0.95) translateY(8px); }
+
+.auth-toolbar { position: fixed; top: 6px; right: 12px; z-index: 10001; display: flex; gap: 8px; align-items: center; color: var(--text-secondary); font-size: 12px; }
+.auth-toolbar button { padding: 4px 8px; border: 1px solid var(--border-default); border-radius: 5px; background: var(--surface-card); color: var(--text-primary); cursor: pointer; }
 
 .disclaimer {
   text-align: center;

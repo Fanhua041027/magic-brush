@@ -131,7 +131,7 @@
 </template>
 
 <script setup>
-import { ref, watch, onMounted } from 'vue'
+import { ref, watch, onMounted, onUnmounted } from 'vue'
 import { api } from '../services/api'
 
 const props = defineProps(['modelValue'])
@@ -147,6 +147,8 @@ const isGrayscale = ref(true)
 const noCompression = ref(false)
 const showLightbox = ref(false)
 const screenshotMode = ref('fullscreen')
+let previewSequence = 0
+let mounted = true
 
 // ---- macOS 权限 ----
 const isMacOS = ref(false)
@@ -226,25 +228,33 @@ watch([quality, sharpen, isGrayscale, noCompression, screenshotMode], () => {
 
 // ---- 预览 ----
 async function updatePreview() {
+  const sequence = ++previewSequence
   loading.value = true
   try {
     const result = await api.getScreenshotPreview(
       quality.value, sharpen.value, isGrayscale.value,
       noCompression.value, screenshotMode.value
     )
+    if (!mounted || sequence !== previewSequence) return
     previewImage.value = result.base64
     imageSize.value = result.size
   } catch (e) {
-    console.error('预览截图失败:', e)
+    if (mounted && sequence === previewSequence) console.error('预览截图失败:', e)
   } finally {
-    loading.value = false
+    if (mounted && sequence === previewSequence) loading.value = false
   }
 }
 
 onMounted(async () => {
+  mounted = true
   detectPlatform()
   await checkPermission()
   updatePreview()
+})
+
+onUnmounted(() => {
+  mounted = false
+  previewSequence++
 })
 </script>
 

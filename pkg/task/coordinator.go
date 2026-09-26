@@ -9,11 +9,12 @@ import (
 
 // Task 表示一个可取消的任务
 type Task struct {
-	ID      int64
-	Ctx     context.Context
-	Cancel  context.CancelFunc
-	Name    string
-	Running bool
+	ID        int64
+	Ctx       context.Context
+	Cancel    context.CancelFunc
+	Name      string
+	RequestID string
+	Running   bool
 }
 
 // TaskCoordinator 统一管理任务调度和取消
@@ -21,16 +22,31 @@ type TaskCoordinator struct {
 	mu          sync.Mutex
 	currentTask *Task
 	taskCounter int64
+	parent      context.Context
 }
 
-// NewTaskCoordinator 创建任务协调器
+// NewTaskCoordinator creates a coordinator whose tasks inherit parent.
+// A nil parent uses context.Background().
+func NewTaskCoordinatorWithContext(parent context.Context) *TaskCoordinator {
+	if parent == nil {
+		parent = context.Background()
+	}
+	return &TaskCoordinator{parent: parent}
+}
+
+// NewTaskCoordinator creates a coordinator with a background parent.
 func NewTaskCoordinator() *TaskCoordinator {
-	return &TaskCoordinator{}
+	return NewTaskCoordinatorWithContext(context.Background())
 }
 
 // StartTask 开始一个新任务，自动取消之前的任务
 // 返回任务上下文和任务ID
 func (tc *TaskCoordinator) StartTask(name string) (context.Context, int64) {
+	return tc.StartRequest(name, "")
+}
+
+// StartRequest starts a task associated with a caller-generated request ID.
+func (tc *TaskCoordinator) StartRequest(name, requestID string) (context.Context, int64) {
 	tc.mu.Lock()
 	defer tc.mu.Unlock()
 
@@ -42,14 +58,15 @@ func (tc *TaskCoordinator) StartTask(name string) (context.Context, int64) {
 
 	// 创建新任务
 	taskID := atomic.AddInt64(&tc.taskCounter, 1)
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(tc.parent)
 
 	tc.currentTask = &Task{
-		ID:      taskID,
-		Ctx:     ctx,
-		Cancel:  cancel,
-		Name:    name,
-		Running: true,
+		ID:        taskID,
+		Ctx:       ctx,
+		Cancel:    cancel,
+		Name:      name,
+		RequestID: requestID,
+		Running:   true,
 	}
 
 	logger.Printf("开始新任务: %s (ID: %d)", name, taskID)
@@ -81,6 +98,20 @@ func (tc *TaskCoordinator) CancelCurrentTask() bool {
 		return true
 	}
 	return false
+}
+
+func (tc *TaskCoordinator) CancelRequest(requestID string) bool {
+	tc.mu.Lock()
+	defer tc.mu.Unlock()
+
+	if requestID == "" || tc.currentTask == nil || tc.currentTask.RequestID != requestID || tc.currentTask.Cancel == nil {
+		return false
+	}
+	tc.currentTask.Cancel()
+	tc.currentTask.Cancel = nil
+	tc.currentTask.Running = false
+	logger.Printf("已取消任务: %s (ID: %d)", tc.currentTask.Name, tc.currentTask.ID)
+	return true
 }
 
 // IsTaskRunning 检查指定任务是否还在运行

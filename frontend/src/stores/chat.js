@@ -1,10 +1,9 @@
 import { defineStore } from 'pinia'
-import { ref, watch } from 'vue'
-import { ChatWithDeepSeek, ChatWithDeepSeekStream, ChatWithScreenshot, ChatWithScreenshotSync, ChatWithDeepSeekStreamWithContext } from '../../wailsjs/go/app/App'
-import { useSettingsStore } from './settings'
+import { ref, watch, onScopeDispose } from 'vue'
+import { CancelRequest, ChatWithScreenshot, ChatWithDeepSeekStreamWithContext } from '../../wailsjs/go/app/App'
 
 // 面试助手个人化 System Prompt
-function buildInterviewSystemPrompt(resumeContent) {
+function buildInterviewSystemPrompt(resumeContent, preferences = {}) {
   let prompt = `你是一位 AI 面试辅助助手。你的核心任务是以用户「朱晋辉」的身份和口吻，用第一人称「我」来回答面试问题。
 
 <身份背景>
@@ -16,6 +15,10 @@ function buildInterviewSystemPrompt(resumeContent) {
 主修课程：人工智能、机器学习、深度学习、大模型(LLM)应用开发、LangChain/LangGraph框架、数据结构与算法
 荣誉：省级以上竞赛奖项13+项、软件著作权4项、华为鸿蒙校园大使
 </身份背景>
+
+<回答语言>
+默认使用中英混合：整体以中文回答，但在技术名词、代码、API、框架名称和必要表达中保留自然英文。除非用户明确要求全中文或全英文，否则不要强行翻译常用技术英文。
+</回答语言>
 
 <回答风格>
 1. 用第一人称「我」回答问题，模仿用户本人在面试现场的表达方式
@@ -64,19 +67,71 @@ function buildInterviewSystemPrompt(resumeContent) {
     prompt += '\n\n【用户简历】\n' + resumeContent
   }
 
+  const length = { brief: '简短，约30秒', standard: '标准，约1分钟', detailed: '详细，约3分钟' }[preferences.answerLength] || '标准，约1分钟'
+  const style = { formal: '正式', natural: '自然口语化', technical: '技术深度优先', conversational: '轻松口语化' }[preferences.answerStyle] || '自然口语化'
+  const structure = { star: 'STAR法则（必须明确按 Situation 情境、Task 任务、Action 行动、Result 结果四段组织；不要把 STAR 当作用户问题的一部分，也不要解释模板）', project: '项目介绍结构', theory: '技术原理结构', proscons: '优缺点分析结构', system: '系统设计结构', free: '根据问题自然组织' }[preferences.answerStructure] || '根据问题自然组织'
+  prompt += `\n\n【本次回答偏好】\n回答长度：${length}；表达风格：${style}；回答结构：${structure}；目标时长：${preferences.answerDuration || '1m'}。${preferences.includeTechnicalDetails === false ? '只保留必要技术细节，不展开实现。' : '保留关键技术细节和量化结果。'}直接输出可口述的回答。`
+
   return prompt
 }
 
 // 本地存储键名
 const STORAGE_KEY = 'magic-brush-chat-history'
-const MAX_HISTORY = 50 // 最大历史记录数
+const MAX_HISTORY = 50
+const CHAT_EXPORT_VERSION = 1
+const MAX_IMPORT_BYTES = 2 * 1024 * 1024
+const MAX_IMPORT_MESSAGES = 500
+const MAX_MESSAGE_CONTENT = 64 * 1024
+const MAX_IMPORT_CONTENT = 1024 * 1024
+const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/
 
 export const useChatStore = defineStore('chat', () => {
   const isVisible = ref(false)
   const isLoading = ref(false)
   const messages = ref([])
+  const draftText = ref('')
   const currentStreamContent = ref('')
-  let streamReceivedData = false // 标记流式是否产生过数据（防竞态）
+  let streamReceivedData = false
+  let activeRequestId = null
+
+  function beginRequest(requestId) {
+    activeRequestId = requestId
+    isLoading.value = true
+    currentStreamContent.value = ''
+    streamReceivedData = false
+  }
+
+  function createRequestId() {
+    if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID()
+    const bytes = new Uint8Array(16)
+    globalThis.crypto.getRandomValues(bytes)
+    return Array.from(bytes, value => value.toString(16).padStart(2, '0')).join('')
+  }
+
+  function normalizeMessage(message) {
+    if (!message || typeof message !== 'object' || Array.isArray(message)) {
+      throw new Error('消息格式无效')
+    }
+    if (message.role !== 'user' && message.role !== 'assistant') {
+      throw new Error('消息角色无效')
+    }
+    if (typeof message.content !== 'string' || message.content.length > MAX_MESSAGE_CONTENT) {
+      throw new Error('消息内容无效或过长')
+    }
+    const createdAt = typeof message.createdAt === 'string' && !Number.isNaN(Date.parse(message.createdAt))
+      ? message.createdAt
+      : new Date().toISOString()
+    return {
+      id: typeof message.id === 'string' && ID_PATTERN.test(message.id) ? message.id : createRequestId(),
+      role: message.role,
+      content: message.content,
+      time: typeof message.time === 'string' && message.time.length <= 32
+        ? message.time
+        : new Date(createdAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
+      timestamp: Number.isFinite(message.timestamp) ? message.timestamp : Date.parse(createdAt),
+      createdAt,
+    }
+  }
 
   // 从本地存储加载历史
   function loadHistory() {
@@ -85,7 +140,8 @@ export const useChatStore = defineStore('chat', () => {
       if (stored) {
         const parsed = JSON.parse(stored)
         if (Array.isArray(parsed)) {
-          messages.value = parsed.slice(-MAX_HISTORY)
+          const recent = parsed.slice(-MAX_HISTORY)
+          messages.value = recent.map(normalizeMessage)
         }
       }
     } catch (e) {
@@ -102,6 +158,15 @@ export const useChatStore = defineStore('chat', () => {
     } catch (e) {
       console.error('Failed to save chat history:', e)
     }
+  }
+
+  let saveHistoryTimer = null
+  function scheduleSaveHistory() {
+    if (saveHistoryTimer !== null) clearTimeout(saveHistoryTimer)
+    saveHistoryTimer = setTimeout(() => {
+      saveHistoryTimer = null
+      saveHistory()
+    }, 500)
   }
 
   // 清除历史
@@ -133,18 +198,19 @@ export const useChatStore = defineStore('chat', () => {
 
   function saveCurrentConversation() {
     if (messages.value.length === 0) return
-    const convId = Date.now().toString()
+    const existingIdx = savedConversations.value.findIndex(c => c.id === activeConversationId.value)
+    const existing = existingIdx >= 0 ? savedConversations.value[existingIdx] : null
+    const convId = existing?.id || activeConversationId.value || createRequestId()
     const firstUserMsg = messages.value.find(m => m.role === 'user')
     const title = firstUserMsg ? firstUserMsg.content.slice(0, 30) + (firstUserMsg.content.length > 30 ? '...' : '') : '新对话'
     const conv = {
       id: convId,
       title,
       messages: JSON.parse(JSON.stringify(messages.value)),
-      createdAt: new Date().toISOString(),
+      createdAt: existing?.createdAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
       messageCount: messages.value.length,
     }
-    // 替换或新增
-    const existingIdx = savedConversations.value.findIndex(c => c.id === activeConversationId.value)
     if (existingIdx >= 0) {
       savedConversations.value[existingIdx] = conv
     } else {
@@ -160,7 +226,7 @@ export const useChatStore = defineStore('chat', () => {
   function startNewConversation() {
     if (messages.value.length > 0) saveCurrentConversation()
     messages.value = []
-    activeConversationId.value = Date.now().toString()
+    activeConversationId.value = createRequestId()
     localStorage.setItem(ACTIVE_CONV_KEY, activeConversationId.value)
     localStorage.removeItem(STORAGE_KEY)
   }
@@ -191,14 +257,34 @@ export const useChatStore = defineStore('chat', () => {
 
   // 监听消息变化，自动保存
   watch(messages, () => {
-    saveHistory()
+    scheduleSaveHistory()
   }, { deep: true })
+
+  onScopeDispose(() => {
+    if (saveHistoryTimer !== null) clearTimeout(saveHistoryTimer)
+    saveHistoryTimer = null
+  })
 
   function show() {
     isVisible.value = true
   }
 
+  async function cancelActiveRequest() {
+    const requestId = activeRequestId
+    if (!requestId) return false
+    activeRequestId = null
+    isLoading.value = false
+    currentStreamContent.value = ''
+    const lastMsg = messages.value[messages.value.length - 1]
+    if (lastMsg?._streaming) {
+      lastMsg.content += '\n\n[已停止生成]'
+      delete lastMsg._streaming
+    }
+    return CancelRequest(requestId)
+  }
+
   function hide() {
+    if (activeRequestId) void cancelActiveRequest()
     isVisible.value = false
   }
 
@@ -210,12 +296,19 @@ export const useChatStore = defineStore('chat', () => {
     messages.value = []
   }
 
+  function setDraftText(text) {
+    draftText.value = typeof text === 'string' ? text.trim() : ''
+  }
+
   function addMessage(role, content) {
+    const createdAt = new Date().toISOString()
     messages.value.push({
+      id: createRequestId(),
       role,
       content,
-      time: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
-      timestamp: Date.now(),
+      time: new Date(createdAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
+      timestamp: Date.parse(createdAt),
+      createdAt,
     })
   }
 
@@ -223,19 +316,13 @@ export const useChatStore = defineStore('chat', () => {
     if (!text.trim() || isLoading.value) return
 
     addMessage('user', text)
-    isLoading.value = true
-    currentStreamContent.value = ''
-    streamReceivedData = false // 重置流式数据标记
+    const requestId = createRequestId()
+    beginRequest(requestId)
 
     try {
-      // 构建带个人化 System Prompt 的消息列表
-      const settingsStore = useSettingsStore()
-      const systemPrompt = buildInterviewSystemPrompt(settingsStore.settings.resumeContent)
-      const msgs = [
-        { role: 'system', content: systemPrompt },
-      ]
+      const msgs = []
       // 添加上文对话历史（最多保留最近 5 轮，避免超出上下文）
-      const history = messages.value.slice(-10)
+      const history = messages.value.slice(0, -1).slice(-10)
       for (const msg of history) {
         if (msg.role === 'user' || msg.role === 'assistant') {
           msgs.push({ role: msg.role, content: msg.content })
@@ -244,65 +331,59 @@ export const useChatStore = defineStore('chat', () => {
       // 加上当前用户消息
       msgs.push({ role: 'user', content: text })
 
-      // 流式输出：传入完整消息列表，后端按序处理
-      await ChatWithDeepSeekStreamWithContext(msgs)
-
-      // 等一小段时间让流式事件到达（防止竞态条件下误判无输出）
-      if (!streamReceivedData) {
-        await new Promise(resolve => setTimeout(resolve, 800))
-      }
-
-      // 检查流式是否真的产生了助手消息
-      const hasAssistantMsg = messages.value.some(
-        m => m.role === 'assistant' && !m._streaming && m.content.length > 0
-      )
-      if (!hasAssistantMsg && !streamReceivedData) {
-        // 流式无输出，降级为非流式
-        const result = await ChatWithDeepSeek(text)
-        if (result) {
-          addMessage('assistant', result)
-        }
-      }
+      // 流式事件由统一监听器处理；不再在固定延迟后重复发起非流式请求。
+      await ChatWithDeepSeekStreamWithContext(requestId, msgs)
     } catch (error) {
+      if (activeRequestId !== requestId) return
       console.error('Chat error:', error)
       addMessage('assistant', `抱歉，发生了错误: ${error.message || '未知错误'}`)
     } finally {
-      isLoading.value = false
-      currentStreamContent.value = ''
+      if (activeRequestId === requestId) {
+        activeRequestId = null
+        isLoading.value = false
+        currentStreamContent.value = ''
+      }
     }
   }
 
-  function handleStreamChunk(chunk) {
-    if (!isLoading.value) return
+  function handleStreamChunk(payload) {
+    if (!payload || payload.requestId !== activeRequestId || !isLoading.value) return
 
-    streamReceivedData = true // 标记已有流式数据
-    currentStreamContent.value += chunk
+    streamReceivedData = true
+    currentStreamContent.value += payload.chunk
 
     // 更新或添加助手消息
     const lastMsg = messages.value[messages.value.length - 1]
     if (lastMsg && lastMsg.role === 'assistant' && lastMsg._streaming) {
       lastMsg.content = currentStreamContent.value
     } else {
+      const createdAt = new Date().toISOString()
       messages.value.push({
+        id: createRequestId(),
         role: 'assistant',
         content: currentStreamContent.value,
-        time: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
-        timestamp: Date.now(),
+        time: new Date(createdAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
+        timestamp: Date.parse(createdAt),
+        createdAt,
         _streaming: true,
       })
     }
   }
 
-  function handleStreamDone() {
+  function handleStreamDone(payload) {
+    if (!payload || payload.requestId !== activeRequestId) return
     const lastMsg = messages.value[messages.value.length - 1]
     if (lastMsg && lastMsg._streaming) {
       delete lastMsg._streaming
     }
+    activeRequestId = null
     isLoading.value = false
     currentStreamContent.value = ''
   }
 
-  function handleStreamError(error) {
+  function handleStreamError(payload) {
+    if (!payload || payload.requestId !== activeRequestId) return
+    const error = payload.error || '未知错误'
     console.error('Stream error:', error)
     const lastMsg = messages.value[messages.value.length - 1]
     if (lastMsg && lastMsg._streaming) {
@@ -311,6 +392,7 @@ export const useChatStore = defineStore('chat', () => {
     } else {
       addMessage('assistant', `抱歉，发生了错误: ${error}`)
     }
+    activeRequestId = null
     isLoading.value = false
     currentStreamContent.value = ''
   }
@@ -320,75 +402,86 @@ export const useChatStore = defineStore('chat', () => {
     if (!text.trim() || isLoading.value) return
 
     addMessage('user', text + ' [附截图]')
-    isLoading.value = true
-    currentStreamContent.value = ''
-    streamReceivedData = false
+    const requestId = createRequestId()
+    beginRequest(requestId)
 
     try {
-      // 流式输出：Go 后端逐字推送，事件驱动更新 messages
-      await ChatWithScreenshot(text, screenshotBase64, '')
-
-      // 等一小段时间让流式事件到达（防竞态）
-      if (!streamReceivedData) {
-        await new Promise(resolve => setTimeout(resolve, 800))
-      }
-
-      // 检查流式是否真的产生了助手消息
-      const hasAssistantMsg = messages.value.some(
-        m => m.role === 'assistant' && !m._streaming && m.content.length > 0
-      )
-      if (!hasAssistantMsg && !streamReceivedData) {
-        // 流式无输出，降级为非流式
-        const result = await ChatWithScreenshotSync(text, screenshotBase64, '')
-        if (result) {
-          addMessage('assistant', result)
-        }
-      }
+      await ChatWithScreenshot(requestId, text, screenshotBase64, '')
     } catch (error) {
+      if (activeRequestId !== requestId) return
       console.error('Chat with screenshot error:', error)
       addMessage('assistant', `抱歉，发生了错误: ${error.message || '未知错误'}`)
     } finally {
-      isLoading.value = false
+      if (activeRequestId === requestId) {
+        activeRequestId = null
+        isLoading.value = false
+        currentStreamContent.value = ''
+      }
     }
   }
 
   function exportHistory() {
     const data = {
+      version: CHAT_EXPORT_VERSION,
       exportTime: new Date().toISOString(),
       messages: messages.value.map(m => ({
+        id: m.id,
         role: m.role,
         content: m.content,
         time: m.time,
+        timestamp: m.timestamp,
+        createdAt: m.createdAt,
       })),
     }
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `chat-history-${new Date().toISOString().slice(0, 10)}.json`
-    a.click()
-    URL.revokeObjectURL(url)
+    const anchor = document.createElement('a')
+    try {
+      anchor.href = url
+      anchor.download = `chat-history-${new Date().toISOString().slice(0, 10)}.json`
+      document.body.appendChild(anchor)
+      anchor.click()
+    } finally {
+      anchor.remove()
+      URL.revokeObjectURL(url)
+    }
   }
 
-  // 导入对话历史
   function importHistory(file) {
     return new Promise((resolve, reject) => {
+      if (!file || !Number.isFinite(file.size) || file.size > MAX_IMPORT_BYTES) {
+        reject(new Error('导入文件无效或超过 2MB'))
+        return
+      }
       const reader = new FileReader()
       reader.onload = (e) => {
         try {
+          if (typeof e.target?.result !== 'string') throw new Error('导入文件内容无效')
           const data = JSON.parse(e.target.result)
-          if (data.messages && Array.isArray(data.messages)) {
-            messages.value = data.messages
-            saveHistory()
-            resolve(data.messages.length)
-          } else {
-            reject(new Error('Invalid file format'))
+          if (!data || data.version !== CHAT_EXPORT_VERSION || !Array.isArray(data.messages)) {
+            throw new Error('不支持的对话文件格式')
           }
+          if (data.messages.length > MAX_IMPORT_MESSAGES) {
+            throw new Error('导入消息数量过多')
+          }
+          let totalContent = 0
+          const ids = new Set()
+          const normalized = data.messages.map(message => {
+            totalContent += typeof message?.content === 'string' ? message.content.length : 0
+            if (totalContent > MAX_IMPORT_CONTENT) throw new Error('导入消息总内容过长')
+            const result = normalizeMessage(message)
+            if (ids.has(result.id)) result.id = createRequestId()
+            ids.add(result.id)
+            return result
+          })
+          messages.value = normalized
+          saveHistory()
+          resolve(normalized.length)
         } catch (err) {
           reject(err)
         }
       }
-      reader.onerror = () => reject(new Error('Failed to read file'))
+      reader.onerror = () => reject(new Error('读取导入文件失败'))
       reader.readAsText(file)
     })
   }
@@ -397,17 +490,21 @@ export const useChatStore = defineStore('chat', () => {
     isVisible,
     isLoading,
     messages,
+    draftText,
     show,
     hide,
     toggle,
+    setDraftText,
     clearMessages,
     clearHistory,
     addMessage,
+    beginRequest,
     sendMessage,
     sendMessageWithScreenshot,
     handleStreamChunk,
     handleStreamDone,
     handleStreamError,
+    cancelActiveRequest,
     exportHistory,
     importHistory,
     savedConversations,

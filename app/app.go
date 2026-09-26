@@ -1,6 +1,7 @@
 package app
 
 import (
+	"ai-assistant/pkg/auth"
 	"ai-assistant/pkg/config"
 	"ai-assistant/pkg/llm"
 	"ai-assistant/pkg/logger"
@@ -13,12 +14,16 @@ import (
 	"ai-assistant/pkg/task"
 	"context"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
+	"sync"
+	"sync/atomic"
+	"time"
 )
 
 type App struct {
 	ctx context.Context
 
 	configManager *config.ConfigManager
+	authService   *auth.Service
 	stateManager  *state.StateManager
 	taskManager   *task.TaskCoordinator
 
@@ -29,15 +34,37 @@ type App struct {
 	solver          *solution.Solver
 	sidecar         *sidecar.Manager
 
-	followUpActive  bool // 追问对话框是否打开
-	standaloneMode  bool // 是否为独立面试窗口模式
+	followUpMu     sync.RWMutex
+	followUpActive bool // 追问对话框是否打开
+	standaloneMode bool // 是否为独立面试窗口模式
+
+	screenshotMu        sync.Mutex
+	screenshotCaptureMu sync.Mutex
+	screenshotBuffer    []string
+	pendingUserMessage  string
+	triggerSendMu       sync.Mutex
+
+	sttOperationMu sync.Mutex
+	sttMu          sync.Mutex
+	sttGeneration  uint64
+	sttCancel      context.CancelFunc
+	sttActive      bool
+	sttWG          sync.WaitGroup
+	shuttingDown   atomic.Bool
+	sidecarWG      sync.WaitGroup
+	startupCancel  context.CancelFunc
 }
 
 func NewApp(mode string) *App {
 	configManager := config.NewConfigManager()
+	authService, err := auth.New()
+	if err != nil {
+		logger.Printf("初始化认证服务失败: %v", err)
+	}
 
 	return &App{
 		configManager:  configManager,
+		authService:    authService,
 		stateManager:   state.NewStateManager(),
 		taskManager:    task.NewTaskCoordinator(),
 		screenService:  screen.NewService(),
@@ -47,10 +74,10 @@ func NewApp(mode string) *App {
 
 func (a *App) Startup(ctx context.Context) {
 	a.ctx = ctx
+	a.taskManager = task.NewTaskCoordinatorWithContext(ctx)
 
 	if a.standaloneMode {
-		a.startupStandalone()
-		return
+		runtime.WindowSetTitle(ctx, "AI 辅助面试")
 	}
 
 	if err := a.configManager.Load(); err != nil {
@@ -78,39 +105,46 @@ func (a *App) Startup(ctx context.Context) {
 	})
 	a.shortcutService.Start()
 
-	// Start Python sidecar
+	// Start Python sidecar. Its startup is cancellable and participates in shutdown.
 	a.sidecar = sidecar.NewManager(18765)
+	startupCtx, startupCancel := context.WithCancel(ctx)
+	a.startupCancel = startupCancel
+	a.stateManager.UpdateInitStatus(state.StatusLoadingModel)
+	a.sidecarWG.Add(1)
 	go func() {
+		defer a.sidecarWG.Done()
 		sttService := cfg.STTService
 		if sttService == "" {
 			sttService = "qwen_cloud" // fallback
 		}
-		if err := a.sidecar.Start(cfg.STTModel, cfg.STTDevice, cfg.STTLanguage, cfg.STTSensitivity, sttService); err != nil {
-			logger.Printf("[Sidecar] Start failed: %v", err)
-		} else if cfg.KBPath != "" {
-			result, err := a.sidecar.Client().KBLoad(cfg.KBPath)
+		if err := a.sidecar.StartContext(startupCtx, cfg.STTModel, cfg.STTDevice, cfg.STTLanguage, cfg.STTSensitivity, sttService); err != nil {
+			if !a.shuttingDown.Load() {
+				logger.Printf("[Sidecar] Start failed: %v", err)
+				a.stateManager.UpdateInitStatus(state.StatusError)
+			}
+			return
+		}
+		if a.shuttingDown.Load() {
+			return
+		}
+		if cfg.KBPath != "" {
+			a.stateManager.UpdateInitStatus(state.StatusLoadingModel)
+			loadCtx, cancel := context.WithTimeout(startupCtx, 30*time.Second)
+			result, err := a.sidecar.Client().KBLoadContext(loadCtx, cfg.KBPath)
+			cancel()
 			if err != nil {
 				logger.Printf("[Sidecar] KB load failed: %v", err)
-			} else {
-				logger.Printf("[Sidecar] KB loaded: %d files, %d sections", result.FileCount, result.SectionCount)
+				a.stateManager.UpdateInitStatus(state.StatusError)
+				return
 			}
+			logger.Printf("[Sidecar] KB loaded: %d files, %d sections", result.FileCount, result.SectionCount)
+		}
+		if !a.shuttingDown.Load() {
+			a.stateManager.UpdateInitStatus(state.StatusReady)
 		}
 	}()
 
 	a.configManager.Subscribe(a.onConfigChanged)
-	a.stateManager.UpdateInitStatus(state.StatusReady)
-}
-
-func (a *App) startupStandalone() {
-	logger.Println("[Standalone] 启动独立面试窗口")
-	if err := a.configManager.Load(); err != nil {
-		logger.Printf("加载配置失败: %v", err)
-	}
-	// 独立窗口仅连接已有的 sidecar，不重新启动
-	a.sidecar = sidecar.NewManager(18765)
-	// 设置窗口标题
-	runtime.WindowSetTitle(a.ctx, "AI 辅助面试")
-	logger.Println("[Standalone] 独立面试窗口就绪")
 }
 
 // IsStandaloneInterview 返回是否独立面试窗口模式
@@ -156,12 +190,20 @@ func (a *App) onConfigChanged(newConfig config.Config, oldConfig config.Config) 
 }
 
 func (a *App) OnShutdown(ctx context.Context) {
-	if a.standaloneMode {
-		logger.Println("[Standalone] 关闭独立面试窗口")
-		return
+	a.shuttingDown.Store(true)
+	if a.startupCancel != nil {
+		a.startupCancel()
+	}
+	a.shutdownSTT()
+	if a.taskManager != nil {
+		a.taskManager.CancelCurrentTask()
 	}
 	if a.shortcutService != nil {
 		a.shortcutService.Stop()
+	}
+	a.sidecarWG.Wait()
+	if a.authService != nil {
+		a.authService.Logout()
 	}
 	if a.sidecar != nil {
 		a.sidecar.Stop()
@@ -172,6 +214,9 @@ func (a *App) OnShutdown(ctx context.Context) {
 }
 
 func (a *App) EmitEvent(eventName string, data ...interface{}) {
+	if a.shuttingDown.Load() || a.ctx == nil {
+		return
+	}
 	runtime.EventsEmit(a.ctx, eventName, data...)
 }
 

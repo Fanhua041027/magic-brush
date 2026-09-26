@@ -2,24 +2,31 @@ package app
 
 import (
 	"ai-assistant/pkg/logger"
+	"errors"
+	"sync"
 	"syscall"
 	"time"
 	"unsafe"
 )
 
 var (
-	user32           = syscall.NewLazyDLL("user32.dll")
-	kernel32         = syscall.NewLazyDLL("kernel32.dll")
-	procOpenClipboard  = user32.NewProc("OpenClipboard")
-	procCloseClipboard = user32.NewProc("CloseClipboard")
-	procEmptyClipboard = user32.NewProc("EmptyClipboard")
-	procSetClipboardData = user32.NewProc("SetClipboardData")
-	procGetClipboardData = user32.NewProc("GetClipboardData")
-	procGlobalAlloc    = kernel32.NewProc("GlobalAlloc")
-	procGlobalLock     = kernel32.NewProc("GlobalLock")
-	procGlobalUnlock   = kernel32.NewProc("GlobalUnlock")
-	procKeybdEvent     = user32.NewProc("keybd_event")
+	user32                    = syscall.NewLazyDLL("user32.dll")
+	kernel32                  = syscall.NewLazyDLL("kernel32.dll")
+	procOpenClipboard         = user32.NewProc("OpenClipboard")
+	procCloseClipboard        = user32.NewProc("CloseClipboard")
+	procEmptyClipboard        = user32.NewProc("EmptyClipboard")
+	procSetClipboardData      = user32.NewProc("SetClipboardData")
+	procGetClipboardData      = user32.NewProc("GetClipboardData")
+	procCountClipboardFormats = user32.NewProc("CountClipboardFormats")
+	procGlobalAlloc           = kernel32.NewProc("GlobalAlloc")
+	procGlobalFree            = kernel32.NewProc("GlobalFree")
+	procGlobalSize            = kernel32.NewProc("GlobalSize")
+	procGlobalLock            = kernel32.NewProc("GlobalLock")
+	procGlobalUnlock          = kernel32.NewProc("GlobalUnlock")
+	procKeybdEvent            = user32.NewProc("keybd_event")
 )
+
+var clipboardInjectMu sync.Mutex
 
 const (
 	CF_UNICODETEXT = 13
@@ -30,30 +37,33 @@ const (
 
 // injectTextViaClipboard 通过剪贴板注入文字到当前活动窗口
 func injectTextViaClipboard(text string) {
-	// 保存当前剪贴板内容
-	oldClipboard := getClipboardText()
+	clipboardInjectMu.Lock()
+	defer clipboardInjectMu.Unlock()
 
-	// 设置新文字到剪贴板
+	oldClipboard, hadText, err := getClipboardText()
+	if err != nil {
+		logger.Printf("[Inject] Clipboard unavailable: %v", err)
+		return
+	}
 	if err := setClipboardText(text); err != nil {
 		logger.Printf("[Inject] Failed to set clipboard: %v", err)
 		return
 	}
+	defer func() {
+		if hadText {
+			err = setClipboardText(oldClipboard)
+		} else {
+			err = clearClipboard()
+		}
+		if err != nil {
+			logger.Printf("[Inject] Failed to restore clipboard: %v", err)
+		}
+	}()
 
-	// 等待一下让剪贴板生效
 	time.Sleep(50 * time.Millisecond)
-
-	// 模拟 Ctrl+V 粘贴
 	simulateCtrlV()
-
-	// 等待粘贴完成
 	time.Sleep(100 * time.Millisecond)
-
-	// 恢复原剪贴板内容
-	if oldClipboard != "" {
-		setClipboardText(oldClipboard)
-	}
-
-	logger.Printf("[Inject] Text injected: %s", text)
+	logger.Printf("[Inject] Text injected: length=%d", len(text))
 }
 
 // setClipboardText 设置剪贴板文字
@@ -77,6 +87,7 @@ func setClipboardText(text string) error {
 	// 锁定内存并复制文字
 	pMem, _, _ := procGlobalLock.Call(hMem)
 	if pMem == 0 {
+		procGlobalFree.Call(hMem)
 		return syscall.GetLastError()
 	}
 	// Safe: Convert global lock pointer to slice for copying
@@ -88,42 +99,60 @@ func setClipboardText(text string) error {
 	// 设置剪贴板数据
 	r, _, _ = procSetClipboardData.Call(CF_UNICODETEXT, hMem)
 	if r == 0 {
+		procGlobalFree.Call(hMem)
 		return syscall.GetLastError()
 	}
 
 	return nil
 }
 
-// getClipboardText 获取剪贴板文字
-func getClipboardText() string {
+func clearClipboard() error {
 	r, _, _ := procOpenClipboard.Call(0, 0, 0)
 	if r == 0 {
-		return ""
+		return syscall.GetLastError()
+	}
+	defer procCloseClipboard.Call()
+	if r, _, _ = procEmptyClipboard.Call(); r == 0 {
+		return syscall.GetLastError()
+	}
+	return nil
+}
+
+// getClipboardText returns whether the clipboard contained Unicode text.
+func getClipboardText() (string, bool, error) {
+	r, _, _ := procOpenClipboard.Call(0, 0, 0)
+	if r == 0 {
+		return "", false, syscall.GetLastError()
 	}
 	defer procCloseClipboard.Call()
 
 	h, _, _ := procGetClipboardData.Call(CF_UNICODETEXT)
 	if h == 0 {
-		return ""
+		count, _, _ := procCountClipboardFormats.Call()
+		if count == 0 {
+			return "", false, nil
+		}
+		return "", false, errors.New("剪贴板包含非文本内容")
 	}
 
 	p, _, _ := procGlobalLock.Call(h)
 	if p == 0 {
-		return ""
+		return "", false, syscall.GetLastError()
 	}
 	defer procGlobalUnlock.Call(h)
 
-	// 读取 UTF-16 字符为 Go string
-	// Safe: Convert to slice to avoid pointer arithmetic
-	const maxClipboardChars = 1 << 20
-	p2 := unsafe.Pointer(p)
-	chars := unsafe.Slice((*uint16)(p2), maxClipboardChars)
-	for i := 0; i < maxClipboardChars; i++ {
+	size, _, _ := procGlobalSize.Call(h)
+	if size < 2 || size > 2*(1<<20) {
+		return "", false, errors.New("剪贴板文本过大或无效")
+	}
+	charCount := int(size / 2)
+	chars := unsafe.Slice((*uint16)(unsafe.Pointer(p)), charCount)
+	for i := 0; i < charCount; i++ {
 		if chars[i] == 0 {
-			return syscall.UTF16ToString(chars[:i])
+			return syscall.UTF16ToString(chars[:i]), true, nil
 		}
 	}
-	return ""
+	return "", false, errors.New("剪贴板文本过大")
 }
 
 // simulateCtrlV 模拟 Ctrl+V 粘贴

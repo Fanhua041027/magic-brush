@@ -15,7 +15,7 @@ import (
 
 type OpenAIAdapter struct {
 	client *openai.Client
-	config *config.Config
+	config config.Config
 }
 
 func NewOpenAIAdapter(cfg *config.Config) *OpenAIAdapter {
@@ -38,7 +38,7 @@ func NewOpenAIAdapter(cfg *config.Config) *OpenAIAdapter {
 
 	return &OpenAIAdapter{
 		client: &client,
-		config: cfg,
+		config: *cfg,
 	}
 }
 
