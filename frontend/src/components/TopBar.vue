@@ -51,6 +51,8 @@
           <Icon name="settings" :size="15" />
         </button>
 
+        <button v-if="authenticated && currentUser?.role === 'admin'" class="bar-btn" type="button" @click.stop="$emit('openAdmin')" title="管理员后台">管理</button>
+        <button v-if="!authenticated" class="bar-btn login-bar-btn" type="button" @mousedown.stop @click.stop="handleLogin" title="登录">登录</button>
         <button class="bar-btn bar-btn-quit" @click="ui.quit" title="退出">
           <Icon name="power" :size="15" />
         </button>
@@ -120,7 +122,9 @@ import ThemeToggle from './ThemeToggle.vue'
 import STTButton from './STTButton.vue'
 import { api } from '../services/api'
 
-defineEmits(['openSettings'])
+const props = defineProps({ authenticated: Boolean, currentUser: Object })
+const emit = defineEmits(['openSettings', 'openLogin', 'openAdmin'])
+function handleLogin() { emit('openLogin') }
 
 const ui = useUIStore()
 const settingsStore = useSettingsStore()

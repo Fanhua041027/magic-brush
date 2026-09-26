@@ -5,18 +5,25 @@
 
 import argparse
 import atexit
-import json
+import base64
+import hmac
 import os
 import signal
 import sys
 import threading
 import time
 
+# Load local, gitignored credentials before reading environment configuration.
+_env_file = os.path.join(os.path.dirname(__file__), ".env")
+if os.path.exists(_env_file):
+    for _line in open(_env_file, encoding="utf-8"):
+        if "=" in _line and not _line.lstrip().startswith("#"):
+            _key, _value = _line.strip().split("=", 1)
+            os.environ.setdefault(_key, _value)
+
 import numpy as np
 
 from flask import Flask, jsonify, request
-from flask_cors import CORS
-from flask_sock import Sock
 
 from audio import AudioRecorder, set_audio_level_callback
 from transcribe import Transcriber
@@ -27,19 +34,27 @@ from stt_manager import STTManager
 from error_handler import ErrorHandler, AppError, ErrorCode, error_handler, safe_execute, retry_on_error
 
 app = Flask(__name__)
-CORS(app)  # 启用 CORS 支持
-sock = Sock(app)
+app.config["MAX_CONTENT_LENGTH"] = 8 * 1024 * 1024
+
+SIDECAR_TOKEN = os.environ.get("MAGIC_BRUSH_SIDECAR_TOKEN", "")
+if not SIDECAR_TOKEN:
+    raise RuntimeError("MAGIC_BRUSH_SIDECAR_TOKEN is required")
+
+@app.before_request
+def require_token():
+    supplied = request.headers.get("Authorization", "")
+    expected = "Bearer " + SIDECAR_TOKEN
+    if not hmac.compare_digest(supplied, expected):
+        return jsonify({"error": "unauthorized"}), 401
 
 # Global state
 recorder: AudioRecorder | None = None
 kb: KnowledgeBase | None = None
 stt_manager: STTManager | None = None
-recording_lock = threading.Lock()
+recording_lock = threading.RLock()
+recording_operation_lock = threading.Lock()
 is_recording = False
-
-# WebSocket clients
-ws_clients = set()
-ws_clients_lock = threading.Lock()
+recording_generation = 0
 
 # 流式转写结果（线程安全）
 _streaming_results: list[str] = []
@@ -50,7 +65,9 @@ _audio_level: float = 0.0
 _audio_level_lock = threading.Lock()
 
 # 千问 API Key — 优先从环境变量读取，其次硬编码
-QWEN_API_KEY = os.environ.get("DASHSCOPE_API_KEY", "sk-3ced1755eb8a44628ce5ff1e5789f4b7")
+QWEN_API_KEY = os.environ.get("DASHSCOPE_API_KEY", "")
+QWEN_BASE_URL = os.environ.get("QWEN_STT_BASE_URL", "https://ws-ghn8v2fudqm1a5bw.cn-beijing.maas.aliyuncs.com/compatible-mode/v1")
+QWEN_STT_MODEL = os.environ.get("QWEN_STT_MODEL", "qwen-audio-3.0-asr-flash-streaming")
 
 
 # ── 关闭与资源管理 ─────────────────────────────────────────
@@ -83,16 +100,33 @@ def api_cleanup():
 
 def cleanup_resources():
     """清理所有资源（线程安全）"""
-    global recorder, kb
-    rec = recorder
-    if rec is not None:
-        try:
-            rec.close()
-            print("[Sidecar] Audio recorder closed", flush=True)
-        except Exception as e:
-            print(f"[Sidecar] Recorder close error: {e}", flush=True)
-    recorder = None
-    kb = None
+    global recorder, kb, is_recording, recording_generation
+    with recording_operation_lock:
+        with recording_lock:
+            recording_generation += 1
+            is_recording = False
+            rec = recorder
+            manager = stt_manager
+            recorder = None
+            kb = None
+            if rec is not None:
+                try:
+                    rec.set_streaming_callback(None)
+                except Exception:
+                    pass
+        if manager is not None:
+            try:
+                manager.stop_streaming()
+            except Exception:
+                pass
+        if rec is not None:
+            try:
+                rec.close()
+                print("[Sidecar] Audio recorder closed", flush=True)
+            except Exception as e:
+                print(f"[Sidecar] Recorder close error: {e}", flush=True)
+    with _streaming_results_lock:
+        _streaming_results.clear()
     print("[Sidecar] Resources cleaned up", flush=True)
 
 
@@ -132,6 +166,7 @@ def health():
         "stt_usage": stt_manager.get_usage_stats() if stt_manager else {},
         "kb_ready": kb is not None and kb.ready,
         "errors": len(error_handler.error_log),
+        "audio": recorder.status() if recorder is not None else {"ready": False},
     })
 
 
@@ -139,6 +174,7 @@ def health():
 def get_errors():
     """获取最近的错误"""
     count = request.args.get("count", 10, type=int)
+    count = max(1, min(count or 10, 100))
     return jsonify({"errors": error_handler.get_recent_errors(count)})
 
 
@@ -169,6 +205,7 @@ def stt_devices():
         "devices": devices,
         "current_device_id": current_device,
         "current_sample_rate": current_rate,
+        "audio": recorder.status() if recorder is not None else {"ready": False},
     })
 
 
@@ -177,37 +214,48 @@ def stt_set_device():
     global recorder
     data = request.get_json(silent=True) or {}
     device_id = data.get("device_id")
-    device_name = data.get("device_name")  # 支持按名称查找设备
+    device_name = data.get("device_name")
+    backend = data.get("backend")
+    speaker_id = data.get("speaker_id")
 
     if device_id is not None:
         try:
             device_id = int(device_id)
+            if device_id < 0 and not speaker_id:
+                from audio import list_input_devices
+                selected = next((item for item in list_input_devices() if item.get("id") == device_id), None)
+                if selected and selected.get("is_loopback"):
+                    backend = "soundcard_loopback"
+                    speaker_id = selected.get("speaker_id")
+                    device_id = None
         except (ValueError, TypeError):
             return jsonify({"error": "Invalid device_id"}), 400
 
-    if recorder is None:
-        return jsonify({"error": "Audio recorder not initialized"}), 500
-    try:
-        from audio import init_audio
-        # 初始化新设备
-        init_audio(device_id, device_name)
-        # 重新打开录音器
-        recorder.reopen(device_id)
-        from audio import get_device_config
-        curr_dev, curr_rate = get_device_config()
-        return jsonify({"status": "ok", "device_id": curr_dev, "sample_rate": curr_rate})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    with recording_lock:
+        if recorder is None:
+            return jsonify({"error": "Audio recorder not initialized"}), 500
+        if is_recording:
+            return jsonify({"error": "Cannot change device while recording"}), 409
+        try:
+            if not recorder.reopen(device_id, device_name, backend, speaker_id):
+                return jsonify({"error": "Audio source could not be opened"}), 500
+            from audio import get_device_config
+            curr_dev, curr_rate = get_device_config()
+            return jsonify({"status": "ok", "device_id": curr_dev, "sample_rate": curr_rate})
+        except Exception:
+            return jsonify({"error": "Audio source could not be changed"}), 500
 
 
 @app.route("/api/stt/status", methods=["GET"])
 def stt_status():
-    return jsonify({"recording": is_recording})
+    with recording_lock:
+        recording = is_recording
+    return jsonify({"recording": recording})
 
 
 @app.route("/api/stt/start", methods=["POST"])
 def stt_start():
-    global is_recording
+    global is_recording, recording_generation
     if recorder is None:
         error = AppError(
             code=ErrorCode.AUDIO_INIT_FAILED,
@@ -224,6 +272,10 @@ def stt_start():
             )
             return jsonify(error.to_dict()), 409
         try:
+            recording_generation += 1
+            with _streaming_results_lock:
+                _streaming_results.clear()
+            recorder.set_streaming_callback(None)
             recorder.start_recording()
             is_recording = True
         except Exception as e:
@@ -235,115 +287,93 @@ def stt_start():
 @app.route("/api/stt/start-streaming", methods=["POST"])
 def stt_start_streaming():
     """开始流式转写（使用 STTManager）"""
-    global is_recording
-    if recorder is None:
-        error = AppError(
-            code=ErrorCode.AUDIO_INIT_FAILED,
-            message="Audio recorder not initialized",
-            recoverable=False,
-        )
-        return jsonify(error.to_dict()), 500
+    global is_recording, recording_generation
+    with recording_operation_lock:
+        with recording_lock:
+            rec = recorder
+            manager = stt_manager
+            if rec is None:
+                error = AppError(
+                    code=ErrorCode.AUDIO_INIT_FAILED,
+                    message="Audio recorder not initialized",
+                    recoverable=False,
+                )
+                return jsonify(error.to_dict()), 500
+            if manager is None or not manager.is_any_ready():
+                error = AppError(
+                    code=ErrorCode.TRANSCRIPTION_FAILED,
+                    message="No STT service available",
+                    recoverable=False,
+                )
+                return jsonify(error.to_dict()), 500
+            if is_recording:
+                error = AppError(
+                    code=ErrorCode.RESOURCE_BUSY,
+                    message="Already recording",
+                    recoverable=True,
+                )
+                return jsonify(error.to_dict()), 409
+            recording_generation += 1
+            generation = recording_generation
+            is_recording = True
 
-    if stt_manager is None or not stt_manager.is_any_ready():
-        error = AppError(
-            code=ErrorCode.TRANSCRIPTION_FAILED,
-            message="No STT service available",
-            recoverable=False,
-        )
-        return jsonify(error.to_dict()), 500
-
-    with recording_lock:
-        if is_recording:
-            error = AppError(
-                code=ErrorCode.RESOURCE_BUSY,
-                message="Already recording",
-                recoverable=True,
-            )
-            return jsonify(error.to_dict()), 409
+        with _streaming_results_lock:
+            _streaming_results.clear()
 
         def streaming_callback(audio_chunk):
             """将音频块送入 STTManager 的流式引擎"""
             try:
-                if audio_chunk.size > 0:
-                    stt_manager.add_audio_chunk(audio_chunk)
+                with recording_lock:
+                    active = is_recording and recording_generation == generation
+                if active and audio_chunk.size > 0:
+                    manager.add_audio_chunk(audio_chunk)
             except Exception as e:
-                error = error_handler.handle_error(e, "streaming_callback")
-                broadcast_ws_message({
-                    "type": "error",
-                    "code": error.code.value,
-                    "message": str(e),
-                })
+                error_handler.handle_error(e, "streaming_callback")
 
-        recorder.set_streaming_callback(streaming_callback)
+        def on_streaming_result(text):
+            if not text.strip():
+                return
+            with recording_lock:
+                active = is_recording and recording_generation == generation
+            if active:
+                with _streaming_results_lock:
+                    _streaming_results.append(text)
+
+        rec.set_streaming_callback(streaming_callback)
+        capture_started = False
+        stream_started = False
         try:
-            recorder.start_recording()
-            is_recording = True
-            # 启动 STT 流式识别（STTManager 自动选择可用服务）
-            def on_streaming_result(text):
-                if text.strip():
-                    broadcast_ws_message({"type": "stt-streaming", "text": text})
-                    with _streaming_results_lock:
-                        _streaming_results.append(text)
-            stt_manager.start_streaming(on_streaming_result, sample_rate=recorder.sample_rate)
-            print("[STT] Streaming started via STTManager", flush=True)
+            rec.start_recording()
+            capture_started = True
+            service = manager.start_streaming(on_streaming_result, sample_rate=16000)
+            if not service:
+                raise RuntimeError("No streaming STT service available")
+            stream_started = True
+            print(f"[STT] Streaming started via STTManager ({service})", flush=True)
+            return jsonify({"status": "recording"})
         except Exception as e:
-            error = error_handler.handle_error(e, "stt_start_streaming")
-            return jsonify(error.to_dict()), 500
-    return jsonify({"status": "recording"})
-
-
-@sock.route("/ws")
-def websocket_handler(ws):
-    """WebSocket 处理器（线程安全）"""
-    with ws_clients_lock:
-        ws_clients.add(ws)
-    count = len(ws_clients)
-    print(f"[WebSocket] Client connected. Total: {count}")
-    try:
-        while True:
-            data = ws.receive(timeout=30)
-            if data is None:
-                break
+            with recording_lock:
+                if recording_generation == generation:
+                    is_recording = False
+                    recording_generation += 1
             try:
-                msg = json.loads(data)
-                handle_ws_message(msg)
-            except json.JSONDecodeError:
+                rec.set_streaming_callback(None)
+            except Exception:
                 pass
-    except Exception as e:
-        print(f"[WebSocket] Error: {e}")
-    finally:
-        with ws_clients_lock:
-            ws_clients.discard(ws)
-        print(f"[WebSocket] Client disconnected. Total: {len(ws_clients)}")
-
-
-def broadcast_ws_message(message):
-    """线程安全地广播消息到所有 WebSocket 客户端"""
-    dead_clients = set()
-    with ws_clients_lock:
-        clients = list(ws_clients)
-    for ws in clients:
-        try:
-            ws.send(json.dumps(message))
-        except Exception:
-            dead_clients.add(ws)
-    # 清理断开的连接
-    if dead_clients:
-        with ws_clients_lock:
-            ws_clients.difference_update(dead_clients)
-
-
-def handle_ws_message(message):
-    """处理 WebSocket 消息"""
-    msg_type = message.get("type")
-    if msg_type == "ping":
-        broadcast_ws_message({"type": "pong"})
-    elif msg_type == "start-streaming":
-        # 触发流式转写
-        pass
-
-
-# 全局变量存储流式转写结果（已在顶部声明）
+            if capture_started:
+                try:
+                    rec.stop_recording()
+                except Exception:
+                    pass
+            if stream_started:
+                try:
+                    manager.stop_streaming()
+                except Exception:
+                    pass
+            with _streaming_results_lock:
+                _streaming_results.clear()
+            error = error_handler.handle_error(e, "stt_start_streaming")
+            return jsonify(error.to_dict()), 503 if not stream_started else 500
 
 
 @app.route("/api/stt/streaming-results", methods=["GET"])
@@ -358,7 +388,7 @@ def stt_streaming_results():
 
 @app.route("/api/stt/stop", methods=["POST"])
 def stt_stop():
-    global is_recording
+    global is_recording, recording_generation
     if recorder is None:
         error = AppError(
             code=ErrorCode.AUDIO_INIT_FAILED,
@@ -375,63 +405,83 @@ def stt_stop():
         )
         return jsonify(error.to_dict()), 500
 
-    with recording_lock:
-        if not is_recording:
-            error = AppError(
-                code=ErrorCode.RESOURCE_BUSY,
-                message="Not recording",
-                recoverable=True,
-            )
-            return jsonify(error.to_dict()), 409
+    with recording_operation_lock:
+        with recording_lock:
+            if not is_recording:
+                error = AppError(
+                    code=ErrorCode.RESOURCE_BUSY,
+                    message="Not recording",
+                    recoverable=True,
+                )
+                return jsonify(error.to_dict()), 409
+            rec = recorder
+            manager = stt_manager
+            is_recording = False
+            recording_generation += 1
+            try:
+                rec.set_streaming_callback(None)
+            except Exception:
+                pass
         try:
-            # 停止流式识别（如果已启动）
-            streaming_text, streaming_service = stt_manager.stop_streaming()
+            # Join capture workers outside recording_lock; callbacks may need it.
+            audio = rec.stop_recording()
+            streaming_text, streaming_service = manager.stop_streaming()
             if streaming_text.strip():
-                broadcast_ws_message({"type": "stt-streaming", "text": streaming_text})
                 with _streaming_results_lock:
                     _streaming_results.append(streaming_text)
-
-            audio = recorder.stop_recording()
-            is_recording = False
         except Exception as e:
-            is_recording = False
             error = error_handler.handle_error(e, "stt_stop")
             return jsonify(error.to_dict()), 500
 
-    # 获取最终转写结果  — 使用 STTManager 自动备份识别
+    # 获取最终转写结果  — 使用 STTManager 自动备份降级
     text = ""
     with _streaming_results_lock:
         if _streaming_results:
             text = "".join(_streaming_results)
             _streaming_results.clear()
     if not text and audio.size > 0:
-        text, used_service = stt_manager.recognize(audio, sample_rate=recorder.sample_rate)
+        text, used_service = manager.recognize(audio, sample_rate=16000)
         if text:
             print(f"[STT] ✅ 识别成功 (服务: {STTManager.SERVICE_NAMES.get(used_service, used_service)})", flush=True)
 
-    print(f"[STT] stop: text={text!r}", flush=True)
-    return jsonify({"text": text, "service": stt_manager.get_primary_service() if stt_manager else None})
+    print(f"[STT] stop: text_length={len(text)}", flush=True)
+    return jsonify({"text": text, "service": manager.get_primary_service() if manager else None})
 
 
 @app.route("/api/stt/record", methods=["POST"])
 def stt_record():
     """Record until silence, then transcribe using STTManager."""
-    if recorder is None:
-        return jsonify({"error": "Audio recorder not initialized"}), 500
-    if stt_manager is None or not stt_manager.is_any_ready():
-        return jsonify({"error": "No STT service available"}), 500
+    global is_recording, recording_generation
+    with recording_lock:
+        if recorder is None:
+            return jsonify({"error": "Audio recorder not initialized"}), 500
+        if stt_manager is None or not stt_manager.is_any_ready():
+            return jsonify({"error": "No STT service available"}), 500
+        if is_recording:
+            return jsonify({"error": "Already recording"}), 409
 
-    data = request.get_json(silent=True) or {}
-    max_seconds = data.get("max_seconds", 30)
-    try:
-        audio = recorder.record_until_silence(max_seconds=max_seconds)
-        if audio.size == 0:
-            return jsonify({"text": ""})
-        text, used_service = stt_manager.recognize(audio, sample_rate=recorder.sample_rate)
-        return jsonify({"text": text, "service": used_service})
-    except Exception as e:
-        error = error_handler.handle_error(e, "stt_record")
-        return jsonify(error.to_dict()), 500
+        data = request.get_json(silent=True) or {}
+        max_seconds = data.get("max_seconds", 30)
+        try:
+            max_seconds = float(max_seconds)
+            if not 1 <= max_seconds <= 120:
+                raise ValueError
+        except (ValueError, TypeError):
+            return jsonify({"error": "max_seconds must be between 1 and 120"}), 400
+        is_recording = True
+        recording_generation += 1
+        try:
+            audio = recorder.record_until_silence(max_seconds=max_seconds)
+            if audio.size == 0:
+                return jsonify({"text": ""})
+            text, used_service = stt_manager.recognize(audio, sample_rate=16000)
+            return jsonify({"text": text, "service": used_service})
+        except Exception as e:
+            error = error_handler.handle_error(e, "stt_record")
+            return jsonify(error.to_dict()), 500
+        finally:
+            is_recording = False
+            recording_generation += 1
 
 
 # ── 系统音频转写 ───────────────────────────────────
@@ -443,22 +493,23 @@ def stt_transcribe():
         return jsonify({"text": "", "error": "STT unavailable"}), 400
     data = request.get_json(silent=True) or {}
     audio_b64 = data.get("audio", "")
-    sr = data.get("sample_rate", 16000)
-    if not audio_b64:
+    if not isinstance(audio_b64, str) or not audio_b64:
         return jsonify({"text": "", "error": "No audio"}), 400
+    if len(audio_b64) > 7 * 1024 * 1024:
+        return jsonify({"text": "", "error": "Audio payload too large"}), 413
     try:
-        import base64 as b64
-        raw = b64.b64decode(audio_b64)
+        raw = base64.b64decode(audio_b64, validate=True)
+        if len(raw) > 5 * 1024 * 1024:
+            return jsonify({"text": "", "error": "Audio payload too large"}), 413
         import io, soundfile as sf
-        audio_arr, rate = sf.read(io.BytesIO(raw))
-        if rate != sr:
-            from audio import _resample
-            audio_arr = _resample(audio_arr, rate)
-        text, used = stt_manager.recognize(audio_arr, sample_rate=sr)
-        return jsonify({"text": text, "service": used})
+        audio_arr, rate = sf.read(io.BytesIO(raw), dtype="float32", always_2d=True)
+        from audio import _canonicalize
+        audio_arr = _canonicalize(audio_arr, rate)
+        text, used = stt_manager.recognize(audio_arr, sample_rate=16000)
+        return jsonify({"status": "transcribed", "text": text, "service": used})
     except Exception as e:
         err = error_handler.handle_error(e, "stt_transcribe")
-        return jsonify({"text": "", "error": str(e)})
+        return jsonify({"text": "", "error": str(e)}), 400
 
 
 # ── KB (Knowledge Base) ─────────────────────────────────────────────
@@ -487,6 +538,12 @@ def kb_search():
     data = request.get_json(silent=True) or {}
     query = data.get("query", "")
     top_k = data.get("top_k", 5)
+    if not isinstance(query, str) or len(query) > 2000:
+        return jsonify({"error": "query is invalid or too long"}), 400
+    try:
+        top_k = max(1, min(int(top_k), 20))
+    except (TypeError, ValueError):
+        return jsonify({"error": "top_k is invalid"}), 400
     if not query:
         return jsonify({"results": []})
     try:
@@ -502,10 +559,10 @@ def kb_load():
     global kb
     data = request.get_json(silent=True) or {}
     path = data.get("path", "")
-    if not path or not os.path.isdir(path):
+    if not isinstance(path, str) or len(path) > 4096 or not path or not os.path.isdir(path):
         error = AppError(
             code=ErrorCode.INVALID_INPUT,
-            message=f"Invalid path: {path}",
+            message="Invalid knowledge base path",
             recoverable=True,
         )
         return jsonify(error.to_dict()), 400
@@ -554,6 +611,8 @@ def main():
         whisper_device=args.device,
         whisper_language=args.language,
         priority=priority,
+        qwen_base_url=QWEN_BASE_URL,
+        qwen_model=QWEN_STT_MODEL,
     )
     loaded = stt_manager.initialize_all()
 
@@ -579,7 +638,6 @@ def main():
         recorder = None
 
     print(f"[Sidecar] Starting HTTP server on port {args.port}")
-    print(f"[Sidecar] WebSocket at ws://127.0.0.1:{args.port}/ws")
     app.run(host="127.0.0.1", port=args.port, debug=False, threaded=True)
 
 

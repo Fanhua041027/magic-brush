@@ -147,6 +147,10 @@ func keyboardHookProc(nCode int, wParam uintptr, lParam uintptr) uintptr {
 		// Push-to-talk: Left Alt 长按录音 (异步调用避免阻塞键盘钩子)
 		if kbd.VkCode == VK_LMENU {
 			if wParam == platform.WM_SYSKEYDOWN || wParam == platform.WM_KEYDOWN {
+				// Windows 会在长按时连续发送 KEYDOWN；只在首次按下时启动录音。
+				if globalManager.heldKeys[kbd.VkCode] {
+					return 1
+				}
 				globalManager.heldKeys[kbd.VkCode] = true
 				logger.Printf("[Shortcut] Left Alt pressed, heldKeys: %d", len(globalManager.heldKeys))
 				if len(globalManager.heldKeys) == 1 && globalManager.OnPushToTalkStart != nil {

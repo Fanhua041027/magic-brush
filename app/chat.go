@@ -2,18 +2,31 @@ package app
 
 import (
 	"ai-assistant/pkg/logger"
-	"context"
 	"fmt"
 
 	openai "github.com/openai/openai-go"
 	"github.com/openai/openai-go/option"
 )
 
-// DeepSeek API 配置（F7 面试助手强制使用）
-const (
-	deepseekBaseURL = "https://api.deepseek.com"
-	deepseekModel   = "deepseek-chat"
-)
+// AI 面试助手使用设置页中配置的通用模型与 API 地址。
+func (a *App) interviewClient() (openai.Client, string, error) {
+	if a.authService == nil || a.authService.Current() == nil {
+		return openai.Client{}, "", fmt.Errorf("请先登录后使用 AI 服务")
+	}
+	cfg := a.configManager.Get()
+	if cfg.APIKey == "" {
+		return openai.Client{}, "", fmt.Errorf("请先在设置中配置 API Key")
+	}
+	baseURL := cfg.BaseURL
+	if baseURL == "" {
+		baseURL = "https://api.openai.com/v1"
+	}
+	model := cfg.Model
+	if model == "" {
+		return openai.Client{}, "", fmt.Errorf("请先在设置中配置模型")
+	}
+	return openai.NewClient(option.WithAPIKey(cfg.APIKey), option.WithBaseURL(baseURL)), model, nil
+}
 
 // 面试助手人格 Prompt — AI 以用户（朱晋辉）的第一人称回答问题
 const interviewPersonaPrompt = `你是一位 AI 面试辅助助手。你的核心任务是以用户「朱晋辉」的身份和口吻，用第一人称「我」来回答面试问题。
@@ -28,15 +41,14 @@ const interviewPersonaPrompt = `你是一位 AI 面试辅助助手。你的核�
 荣誉：省级以上竞赛奖项13+项、软件著作权4项、华为鸿蒙校园大使
 </身份背景>
 
-<回答风格>
-1. 用第一人称「我」回答问题，模仿用户本人在面试现场的表达方式
-2. 语气自信、专业、谦逊 — 像一个有实战经验的在校生
-3. 技术表达直接、精准，用技术术语沟通（面试官是懂技术的）
-4. 回答结构清晰：先给出核心结论，再展开具体细节
-5. 项目经验用 STAR 法则（情境-任务-行动-结果）组织
-6. 遇到不熟悉的技术领域坦诚说「了解不多，但我的理解是…」，不要编造
-7. 避免空泛套话、避免过度谦虚、避免过于冗长
-</回答风格>
+<回答要求>
+- **第一人称**：从我（朱晋辉）的角度说话，语气像在校生，自信且谦逊
+- **结构化**：先说结论/观点，再跟一个关键数据或案例支撑，适当展开
+- **口语化**：适合面试时口头表达，不要书面语
+- **不熟悉的**：坦诚说"这块我了解不多，我的理解是…"
+- **不说废话**：不要总结、不要铺垫、不要说"首先/其次/总的来说"
+- **字数控制**：普通问题回答 ≤ 300 字，复杂问题 ≤ 600 字
+</回答要求>
 
 <项目经验>
 1. 金融智能决策与投研多智能体系统（币星人）（负责人 | 2025.06-2025.12）
@@ -60,22 +72,19 @@ const interviewPersonaPrompt = `你是一位 AI 面试辅助助手。你的核�
 
 // 面试助手行为规则
 const interviewBehaviorRules = `
-<行为规则>
-1. 结合用户的简历和项目经历来回答问题，让回答有具体案例支撑
-2. 如果用户的问题涉及知识库内容，优先参考知识库中的知识点
-3. 如果是算法或技术题，先给出解题思路，再写代码
-4. 如果是行为面试题（如"请介绍你自己"），用 STAR 法则组织回答
-5. 回答中适当展现技术深度（如提到量化、推理框架、架构设计等）
-6. 不要输出与面试无关的寒暄或闲聊内容
-7. 保持回答简洁，重点突出，便于面试时口头表达
-</行为规则>
+<回答规则>
+- **先结论后展开**：直接亮观点，再用具体数据或项目案例支撑，适当展开细节
+- **STAR 法则**：用情境-任务-行动-结果组织项目描述，每个环节 1-2 句话
+- **技术题**：先讲核心原理，再结合你的实践经验说明
+- **行为题**：用一个具体事例 + 量化结果说明
+- **代码题**：先讲思路，再写代码，关键行加注释
+- **遇到追问**：只补充新信息，不重复前面说过的
 
-<格式规则>
-- 使用 Markdown 格式
-- 代码块标明语言
-- 重要概念用加粗强调
-- 需要步骤时使用编号列表
-</格式规则>`
+<格式>
+- 口语化表达，适合面试时直接说出来
+- 重要概念自然加重语气
+- 代码用代码块（标明语言）
+</回答规则>`
 
 // getAPIKey 从配置获取 API Key，未配置时返回空字符串（让 API 调用自然失败）
 func (a *App) getAPIKey() string {
@@ -90,17 +99,16 @@ func (a *App) getAPIKey() string {
 
 // ChatWithDeepSeek 使用 DeepSeek API 进行对话（非流式）—— 仅 F7 使用
 func (a *App) ChatWithDeepSeek(message string) string {
-	apiKey := a.getAPIKey()
-	if apiKey == "" {
-		return "请先在设置中配置 API Key"
+	if err := validateChatText(message); err != nil {
+		return err.Error()
+	}
+	client, model, err := a.interviewClient()
+	if err != nil {
+		return err.Error()
 	}
 
-	client := openai.NewClient(
-		option.WithAPIKey(apiKey),
-		option.WithBaseURL(deepseekBaseURL),
-	)
-
-	ctx := context.Background()
+	ctx, taskID := a.taskManager.StartTask("chat")
+	defer a.taskManager.CompleteTask(taskID)
 
 	// 搜索知识库
 	kbContext := ""
@@ -130,7 +138,7 @@ func (a *App) ChatWithDeepSeek(message string) string {
 	}
 
 	resp, err := client.Chat.Completions.New(ctx, openai.ChatCompletionNewParams{
-		Model: deepseekModel,
+		Model: model,
 		Messages: []openai.ChatCompletionMessageParamUnion{
 			openai.SystemMessage(systemPrompt),
 			openai.UserMessage(message),
@@ -138,8 +146,8 @@ func (a *App) ChatWithDeepSeek(message string) string {
 	})
 
 	if err != nil {
-		logger.Printf("[Chat] API error: %v", err)
-		return fmt.Sprintf("抱歉，请求失败: %v", err)
+		logger.Printf("[Chat] API request failed")
+		return safeProviderError()
 	}
 
 	if len(resp.Choices) > 0 {
@@ -150,24 +158,27 @@ func (a *App) ChatWithDeepSeek(message string) string {
 }
 
 // ChatWithDeepSeekStream 使用 DeepSeek API 进行对话（流式输出）—— 仅 F7 使用
-func (a *App) ChatWithDeepSeekStream(message string) {
-	apiKey := a.getAPIKey()
-	if apiKey == "" {
-		a.EmitEvent("chat-stream-error", "请先在设置中配置 API Key")
+func (a *App) ChatWithDeepSeekStream(requestID, message string) {
+	if !validRequestID(requestID) {
+		return
+	}
+	if err := validateChatText(message); err != nil {
+		a.EmitEvent("chat-stream-error", map[string]any{"requestId": requestID, "error": err.Error()})
+		return
+	}
+	client, model, err := a.interviewClient()
+	if err != nil {
+		a.EmitEvent("chat-stream-error", map[string]any{"requestId": requestID, "error": err.Error()})
 		return
 	}
 
-	client := openai.NewClient(
-		option.WithAPIKey(apiKey),
-		option.WithBaseURL(deepseekBaseURL),
-	)
-
-	ctx := context.Background()
+	ctx, taskID := a.taskManager.StartRequest("chat", requestID)
+	defer a.taskManager.CompleteTask(taskID)
 
 	// 搜索知识库
 	kbContext := ""
 	if a.sidecar != nil && a.sidecar.IsRunning() {
-		result, err := a.sidecar.Client().KBSearch(message, 3)
+		result, err := a.sidecar.Client().KBSearchContext(ctx, message, 3)
 		if err == nil && len(result.Results) > 0 {
 			kbContext = "\n\n【参考知识库】\n"
 			for _, r := range result.Results {
@@ -192,7 +203,7 @@ func (a *App) ChatWithDeepSeekStream(message string) {
 	}
 
 	stream := client.Chat.Completions.NewStreaming(ctx, openai.ChatCompletionNewParams{
-		Model: deepseekModel,
+		Model: model,
 		Messages: []openai.ChatCompletionMessageParamUnion{
 			openai.SystemMessage(systemPrompt),
 			openai.UserMessage(message),
@@ -201,48 +212,56 @@ func (a *App) ChatWithDeepSeekStream(message string) {
 
 	defer stream.Close()
 
+	receivedContent := false
 	for stream.Next() {
 		evt := stream.Current()
 		if len(evt.Choices) > 0 {
 			content := evt.Choices[0].Delta.Content
 			if content != "" {
-				a.EmitEvent("chat-stream-chunk", content)
+				receivedContent = true
+				a.emitRequestEvent(ctx, taskID, "chat-stream-chunk", requestID, "chunk", content)
 			}
 		}
 	}
 
 	if err := stream.Err(); err != nil {
-		logger.Printf("[Chat] Stream error: %v", err)
-		a.EmitEvent("chat-stream-error", err.Error())
+		logger.Printf("[Chat] Stream request failed")
+		a.emitRequestEvent(ctx, taskID, "chat-stream-error", requestID, "error", safeProviderError())
 		return
 	}
 
-	a.EmitEvent("chat-stream-done")
+	if !receivedContent {
+		a.emitRequestEvent(ctx, taskID, "chat-stream-error", requestID, "error", "模型没有返回内容")
+		return
+	}
+	a.emitRequestEvent(ctx, taskID, "chat-stream-done", requestID, "", nil)
 }
 
 // ChatWithDeepSeekStreamWithContext 使用 DeepSeek API 进行带上下文的对话（流式输出）—— 仅 F7 使用
-func (a *App) ChatWithDeepSeekStreamWithContext(messages []map[string]string) {
-	apiKey := a.getAPIKey()
-	if apiKey == "" {
-		a.EmitEvent("chat-stream-error", "请先在设置中配置 API Key")
+func (a *App) ChatWithDeepSeekStreamWithContext(requestID string, messages []map[string]string) {
+	if !validRequestID(requestID) {
+		return
+	}
+	if err := validateChatContext(messages); err != nil {
+		a.EmitEvent("chat-stream-error", map[string]any{"requestId": requestID, "error": err.Error()})
+		return
+	}
+	client, model, err := a.interviewClient()
+	if err != nil {
+		a.EmitEvent("chat-stream-error", map[string]any{"requestId": requestID, "error": err.Error()})
 		return
 	}
 
-	client := openai.NewClient(
-		option.WithAPIKey(apiKey),
-		option.WithBaseURL(deepseekBaseURL),
-	)
-
-	ctx := context.Background()
+	ctx, taskID := a.taskManager.StartRequest("chat", requestID)
+	defer a.taskManager.CompleteTask(taskID)
 
 	// 转换消息格式
-	openaiMessages := make([]openai.ChatCompletionMessageParamUnion, 0, len(messages))
+	openaiMessages := make([]openai.ChatCompletionMessageParamUnion, 0, len(messages)+1)
+	openaiMessages = append(openaiMessages, openai.SystemMessage(interviewPersonaPrompt+interviewBehaviorRules))
 	for _, msg := range messages {
 		role := msg["role"]
 		content := msg["content"]
 		switch role {
-		case "system":
-			openaiMessages = append(openaiMessages, openai.SystemMessage(content))
 		case "user":
 			openaiMessages = append(openaiMessages, openai.UserMessage(content))
 		case "assistant":
@@ -251,43 +270,75 @@ func (a *App) ChatWithDeepSeekStreamWithContext(messages []map[string]string) {
 	}
 
 	stream := client.Chat.Completions.NewStreaming(ctx, openai.ChatCompletionNewParams{
-		Model:    deepseekModel,
+		Model:    model,
 		Messages: openaiMessages,
 	})
 
 	defer stream.Close()
 
+	receivedContent := false
 	for stream.Next() {
 		evt := stream.Current()
 		if len(evt.Choices) > 0 {
 			content := evt.Choices[0].Delta.Content
 			if content != "" {
-				a.EmitEvent("chat-stream-chunk", content)
+				receivedContent = true
+				a.emitRequestEvent(ctx, taskID, "chat-stream-chunk", requestID, "chunk", content)
 			}
 		}
 	}
 
 	if err := stream.Err(); err != nil {
-		logger.Printf("[Chat] Stream error: %v", err)
-		a.EmitEvent("chat-stream-error", err.Error())
+		logger.Printf("[Chat] Stream request failed")
+		a.emitRequestEvent(ctx, taskID, "chat-stream-error", requestID, "error", safeProviderError())
 		return
 	}
 
-	a.EmitEvent("chat-stream-done")
+	if !receivedContent {
+		a.emitRequestEvent(ctx, taskID, "chat-stream-error", requestID, "error", "模型没有返回内容")
+		return
+	}
+	a.emitRequestEvent(ctx, taskID, "chat-stream-done", requestID, "", nil)
 }
 
-// ChatWithScreenshot 使用用户配置的 API 进行截图追问对话（流式输出）—— F8 追问使用
-func (a *App) ChatWithScreenshot(message string, screenshotBase64 string, previousContext string) {
-	// 使用用户配置的 API Key 和模型（与 F8 截图相同）
+// ChatWithScreenshot 进行截图追问对话（流式输出）—— F8 追问使用
+// 优先使用截图专用配置（ScreenshotAPIKey/ScreenshotBaseURL/ScreenshotModel），
+// 无截图专用配置时回退到通用配置
+func (a *App) ChatWithScreenshot(requestID, message string, screenshotBase64 string, previousContext string) {
+	if !validRequestID(requestID) {
+		return
+	}
+	if a.authService == nil || a.authService.Current() == nil {
+		a.EmitEvent("chat-stream-error", map[string]any{"requestId": requestID, "error": "请先登录后使用 AI 服务"})
+		return
+	}
+	if err := validateScreenshotInput(message, screenshotBase64, previousContext); err != nil {
+		a.EmitEvent("chat-stream-error", map[string]any{"requestId": requestID, "error": err.Error()})
+		return
+	}
 	cfg := a.configManager.Get()
-	apiKey := cfg.APIKey
+	apiKey := cfg.ScreenshotAPIKey
+	if apiKey == "" {
+		apiKey = cfg.APIKey
+	}
 	if apiKey == "" {
 		apiKey = a.getAPIKey()
 	}
 
-	baseURL := cfg.BaseURL
+	baseURL := cfg.ScreenshotBaseURL
+	if baseURL == "" {
+		baseURL = cfg.BaseURL
+	}
 	if baseURL == "" {
 		baseURL = "https://api.openai.com/v1"
+	}
+
+	modelToUse := cfg.ScreenshotModel
+	if modelToUse == "" {
+		modelToUse = cfg.Model
+	}
+	if modelToUse == "" {
+		modelToUse = "gpt-4o-mini"
 	}
 
 	client := openai.NewClient(
@@ -295,12 +346,13 @@ func (a *App) ChatWithScreenshot(message string, screenshotBase64 string, previo
 		option.WithBaseURL(baseURL),
 	)
 
-	ctx := context.Background()
+	ctx, taskID := a.taskManager.StartRequest("chat", requestID)
+	defer a.taskManager.CompleteTask(taskID)
 
 	// 搜索知识库
 	kbContext := ""
 	if a.sidecar != nil && a.sidecar.IsRunning() {
-		result, err := a.sidecar.Client().KBSearch(message, 3)
+		result, err := a.sidecar.Client().KBSearchContext(ctx, message, 3)
 		if err == nil && len(result.Results) > 0 {
 			kbContext = "\n\n【参考知识库】\n"
 			for _, r := range result.Results {
@@ -330,17 +382,16 @@ func (a *App) ChatWithScreenshot(message string, screenshotBase64 string, previo
 		openai.SystemMessage(systemPrompt),
 	}
 
-	// 如果有多模态模型则传图，否则文本说明
-	userMessage := message
+	// 构建用户消息；截图追问必须使用多模态格式，不能只发送文字占位符。
 	if screenshotBase64 != "" {
-		userMessage = message + "\n\n[注：用户已截图，截图内容已在之前的对话中提供]"
-	}
-	messages = append(messages, openai.UserMessage(userMessage))
-
-	// 使用用户配置的模型
-	modelToUse := cfg.Model
-	if modelToUse == "" {
-		modelToUse = deepseekModel
+		messages = append(messages, openai.UserMessage([]openai.ChatCompletionContentPartUnionParam{
+			openai.TextContentPart(message),
+			openai.ImageContentPart(openai.ChatCompletionContentPartImageImageURLParam{
+				URL: screenshotBase64,
+			}),
+		}))
+	} else {
+		messages = append(messages, openai.UserMessage(message))
 	}
 
 	stream := client.Chat.Completions.NewStreaming(ctx, openai.ChatCompletionNewParams{
@@ -350,37 +401,54 @@ func (a *App) ChatWithScreenshot(message string, screenshotBase64 string, previo
 
 	defer stream.Close()
 
+	receivedContent := false
 	for stream.Next() {
 		evt := stream.Current()
 		if len(evt.Choices) > 0 {
 			content := evt.Choices[0].Delta.Content
 			if content != "" {
-				a.EmitEvent("chat-stream-chunk", content)
+				receivedContent = true
+				a.emitRequestEvent(ctx, taskID, "chat-stream-chunk", requestID, "chunk", content)
 			}
 		}
 	}
 
 	if err := stream.Err(); err != nil {
-		logger.Printf("[Chat] Stream error: %v", err)
-		a.EmitEvent("chat-stream-error", err.Error())
+		logger.Printf("[Chat] Stream request failed")
+		a.emitRequestEvent(ctx, taskID, "chat-stream-error", requestID, "error", safeProviderError())
 		return
 	}
 
-	a.EmitEvent("chat-stream-done")
+	if !receivedContent {
+		a.emitRequestEvent(ctx, taskID, "chat-stream-error", requestID, "error", "模型没有返回内容")
+		return
+	}
+	a.emitRequestEvent(ctx, taskID, "chat-stream-done", requestID, "", nil)
 }
 
 // ChatWithScreenshotSync 使用用户配置的 API 进行截图追问对话（非流式，支持图片）
 func (a *App) ChatWithScreenshotSync(message string, screenshotBase64 string, previousContext string) string {
-	// 使用用户配置的 API Key 和模型（与首次 F8 截图相同）
+	if a.authService == nil || a.authService.Current() == nil {
+		return "请先登录后使用 AI 服务"
+	}
+	if err := validateScreenshotInput(message, screenshotBase64, previousContext); err != nil {
+		return err.Error()
+	}
 	cfg := a.configManager.Get()
-	apiKey := cfg.APIKey
+	apiKey := cfg.ScreenshotAPIKey
+	if apiKey == "" {
+		apiKey = cfg.APIKey
+	}
 	if apiKey == "" {
 		apiKey = a.getAPIKey()
 	}
 
-	baseURL := cfg.BaseURL
+	baseURL := cfg.ScreenshotBaseURL
 	if baseURL == "" {
-		baseURL = "https://api.openai.com/v1" // 与 NewOpenAIAdapter 默认值相同
+		baseURL = cfg.BaseURL
+	}
+	if baseURL == "" {
+		baseURL = "https://api.openai.com/v1"
 	}
 
 	client := openai.NewClient(
@@ -388,7 +456,8 @@ func (a *App) ChatWithScreenshotSync(message string, screenshotBase64 string, pr
 		option.WithBaseURL(baseURL),
 	)
 
-	ctx := context.Background()
+	ctx, taskID := a.taskManager.StartTask("chat")
+	defer a.taskManager.CompleteTask(taskID)
 
 	// 搜索知识库
 	kbContext := ""
@@ -436,10 +505,12 @@ func (a *App) ChatWithScreenshotSync(message string, screenshotBase64 string, pr
 		messages = append(messages, openai.UserMessage(message))
 	}
 
-	// 使用用户配置的模型（与首次 F8 截图相同）
-	modelToUse := cfg.Model
+	modelToUse := cfg.ScreenshotModel
 	if modelToUse == "" {
-		modelToUse = deepseekModel
+		modelToUse = cfg.Model
+	}
+	if modelToUse == "" {
+		modelToUse = "gpt-4o-mini"
 	}
 
 	resp, err := client.Chat.Completions.New(ctx, openai.ChatCompletionNewParams{
@@ -448,8 +519,8 @@ func (a *App) ChatWithScreenshotSync(message string, screenshotBase64 string, pr
 	})
 
 	if err != nil {
-		logger.Printf("[Chat] ChatWithScreenshotSync error: %v", err)
-		return fmt.Sprintf("抱歉，请求失败: %v", err)
+		logger.Printf("[Chat] Screenshot request failed")
+		return safeProviderError()
 	}
 
 	if len(resp.Choices) > 0 {

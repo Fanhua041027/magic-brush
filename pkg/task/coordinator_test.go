@@ -1,6 +1,7 @@
 package task
 
 import (
+	"context"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -145,6 +146,56 @@ func TestTaskContextCancellation(t *testing.T) {
 
 	if tc.HasRunningTask() {
 		t.Fatal("expected no running task after CompleteTask")
+	}
+}
+
+func TestParentContextCancelsTask(t *testing.T) {
+	parent, cancel := context.WithCancel(context.Background())
+	tc := NewTaskCoordinatorWithContext(parent)
+	ctx, _ := tc.StartTask("child")
+
+	cancel()
+	select {
+	case <-ctx.Done():
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("task context should inherit parent cancellation")
+	}
+}
+
+func TestCompletingStaleTaskDoesNotAffectCurrentTask(t *testing.T) {
+	tc := NewTaskCoordinator()
+	_, staleID := tc.StartTask("stale")
+	_, currentID := tc.StartTask("current")
+
+	tc.CompleteTask(staleID)
+	if !tc.IsTaskRunning(currentID) {
+		t.Fatal("completing stale task should not affect current task")
+	}
+}
+
+func TestCancelRequestOnlyCancelsMatchingTask(t *testing.T) {
+	tc := NewTaskCoordinator()
+	ctx, id := tc.StartRequest("chat", "request-current")
+
+	if tc.CancelRequest("request-stale") {
+		t.Fatal("stale request must not cancel current task")
+	}
+	if !tc.IsTaskRunning(id) {
+		t.Fatal("current task should still be running")
+	}
+	select {
+	case <-ctx.Done():
+		t.Fatal("stale cancellation canceled the current context")
+	default:
+	}
+
+	if !tc.CancelRequest("request-current") {
+		t.Fatal("matching request should be canceled")
+	}
+	select {
+	case <-ctx.Done():
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("matching cancellation should cancel context")
 	}
 }
 

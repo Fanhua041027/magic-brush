@@ -95,22 +95,32 @@
 </template>
 
 <script setup>
-import { ref, nextTick, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, nextTick, onMounted, onUnmounted, watch } from 'vue'
 import Icon from './Icon.vue'
 import { useChatStore } from '../stores/chat'
 import { renderMarkdownWithLatex } from '../utils/markdown-latex'
-import { CancelRunningTask } from '../../wailsjs/go/app/App'
-import { Quit, EventsOn, EventsOff } from '../../wailsjs/runtime/runtime'
+import { Quit } from '../../wailsjs/runtime/runtime'
+import { onMany } from '../services/events'
 
 const chatStore = useChatStore()
-const inputText = ref('')
+const inputText = computed({
+  get: () => chatStore.draftText,
+  set: value => chatStore.setDraftText(value),
+})
 const transcriptRef = ref(null)
 const agentRef = ref(null)
 const showHistory = ref(false)
 const transcripts = ref([])
 const streamingText = ref('')
+let cleanupEvents = null
 
 function renderMarkdown(text) { return text ? renderMarkdownWithLatex(text) : '' }
+
+function onStorage(e) {
+  if (e.key === 'magic-brush-stt-draft' && e.newValue) {
+    chatStore.setDraftText(e.newValue)
+  }
+}
 
 function closeWindow() { Quit() }
 
@@ -135,20 +145,30 @@ async function sendMessage() {
 }
 
 async function stopThinking() {
-  try { await CancelRunningTask(); chatStore.isLoading = false }
+  try { await chatStore.cancelActiveRequest() }
   catch (e) { console.error(e) }
 }
 
 onMounted(() => {
-  EventsOn('chat-stream-chunk', chunk => chatStore.handleStreamChunk(chunk))
-  EventsOn('chat-stream-done', () => chatStore.handleStreamDone())
-  EventsOn('chat-stream-error', error => chatStore.handleStreamError(error))
+  cleanupEvents = onMany({
+    'chat-stream-chunk': payload => chatStore.handleStreamChunk(payload),
+    'chat-stream-done': payload => chatStore.handleStreamDone(payload),
+    'chat-stream-error': payload => chatStore.handleStreamError(payload),
+    'stt-transcribed': text => {
+      if (typeof text === 'string' && text.trim()) chatStore.setDraftText(text)
+    },
+  })
+  window.addEventListener('storage', onStorage)
+  try {
+    const draft = localStorage.getItem('magic-brush-stt-draft')
+    if (draft) chatStore.setDraftText(draft)
+  } catch (_) {}
 })
 
 onUnmounted(() => {
-  EventsOff('chat-stream-chunk')
-  EventsOff('chat-stream-done')
-  EventsOff('chat-stream-error')
+  cleanupEvents?.()
+  cleanupEvents = null
+  window.removeEventListener('storage', onStorage)
 })
 
 watch(() => chatStore.messages.length, () => {

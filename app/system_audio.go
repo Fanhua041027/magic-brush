@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"mime/multipart"
 	"net/http"
 	"os"
@@ -17,14 +18,18 @@ import (
 
 // AudioDevice represents an audio input device
 type AudioDevice struct {
-	Index       int     `json:"index"`
-	Name        string  `json:"name"`
-	Type        string  `json:"type"` // "mic", "stereo_mix", "line_in"
-	Channels    int     `json:"channels"`
-	SampleRate  int     `json:"default_samplerate"`
-	HostAPI     string  `json:"host_api"`
-	IsDefault   bool    `json:"is_default"`
-	Recommended bool    `json:"recommended,omitempty"` // 推荐的立体声混音设备
+	Index       int    `json:"index"`
+	Name        string `json:"name"`
+	Type        string `json:"type"` // "system_audio", "stereo_mix", "cable", or "mic"
+	Channels    int    `json:"channels"`
+	SampleRate  int    `json:"default_samplerate"`
+	HostAPI     string `json:"host_api"`
+	IsDefault   bool   `json:"is_default"`
+	Recommended bool   `json:"recommended,omitempty"`
+	Backend     string `json:"backend,omitempty"`
+	CaptureMode string `json:"capture_mode,omitempty"`
+	IsLoopback  bool   `json:"is_loopback,omitempty"`
+	SpeakerID   string `json:"speaker_id,omitempty"`
 }
 
 // AudioCaptureResult is the result of an audio capture
@@ -54,6 +59,9 @@ func NewAudioCaptureService() *AudioCaptureService {
 
 // AudioListDevices lists audio input devices via Python script
 func (a *App) AudioListDevices() string {
+	if err := a.requireAuthenticated(); err != nil {
+		return fmt.Sprintf(`{"error":%q}`, err.Error())
+	}
 	scriptPath := a.findAudioScript()
 	if scriptPath == "" {
 		return "[]"
@@ -74,15 +82,18 @@ func (a *App) AudioListDevices() string {
 
 // AudioCapture captures system audio for the given duration
 func (a *App) AudioCapture(deviceID int, durationSec float64) string {
+	if err := a.requireAuthenticated(); err != nil {
+		return fmt.Sprintf(`{"error":%q}`, err.Error())
+	}
+	if math.IsNaN(durationSec) || math.IsInf(durationSec, 0) || durationSec < 1 || durationSec > 120 {
+		return `{"error":"duration must be between 1 and 120 seconds"}`
+	}
 	scriptPath := a.findAudioScript()
 	if scriptPath == "" {
 		return `{"error":"Audio capture script not found"}`
 	}
 
-	args := []string{scriptPath, "capture"}
-	if deviceID > 0 {
-		args = append(args, fmt.Sprintf("%d", deviceID))
-	}
+	args := []string{scriptPath, "capture", fmt.Sprintf("%d", deviceID)}
 	args = append(args, fmt.Sprintf("%.1f", durationSec))
 
 	cmd := exec.Command("python3", args...)
@@ -105,6 +116,12 @@ func (a *App) AudioCaptureWithEnhancement(deviceID int, durationSec float64) str
 // AudioTranscribe sends captured audio for transcription.
 // Prioritizes the sidecar STT pipeline (same as Left Alt), falls back to API call.
 func (a *App) AudioTranscribe(base64Data string) string {
+	if err := a.requireAuthenticated(); err != nil {
+		return fmt.Sprintf(`{"error":%q}`, err.Error())
+	}
+	if len(base64Data) == 0 || len(base64Data) > maxAudioBase64Bytes {
+		return `{"error":"音频内容无效或过大"}`
+	}
 	// 优先走 sidecar STT 管线（与左 Alt 按键同一套，准确率更高）
 	if a.sidecar != nil && a.sidecar.IsRunning() {
 		result, err := a.sidecar.Client().STTTranscribe(base64Data, 16000)
@@ -134,8 +151,8 @@ func (a *App) AudioTranscribe(base64Data string) string {
 	}
 
 	wavData, err := base64.StdEncoding.DecodeString(base64Data)
-	if err != nil {
-		return fmt.Sprintf(`{"error":"%s"}`, err.Error())
+	if err != nil || len(wavData) > maxDecodedAudioBytes {
+		return `{"error":"音频内容无效或过大"}`
 	}
 
 	var b bytes.Buffer
@@ -146,9 +163,15 @@ func (a *App) AudioTranscribe(base64Data string) string {
 	writer.WriteField("language", "zh")
 	writer.Close()
 
-	req, err := http.NewRequestWithContext(context.Background(), "POST", baseURL+"/audio/transcriptions", &b)
+	ctx := a.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, "POST", baseURL+"/audio/transcriptions", &b)
 	if err != nil {
-		return fmt.Sprintf(`{"error":"%s"}`, err.Error())
+		return `{"error":"无法创建转写请求"}`
 	}
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	req.Header.Set("Authorization", "Bearer "+apiKey)
@@ -156,23 +179,33 @@ func (a *App) AudioTranscribe(base64Data string) string {
 	client := &http.Client{Timeout: 120 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Sprintf(`{"error":"%s"}`, err.Error())
+		return `{"error":"音频转写服务请求失败"}`
 	}
 	defer resp.Body.Close()
 
-	body, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != 200 {
-		return fmt.Sprintf(`{"error":"API error %d: %s"}`, resp.StatusCode, string(body))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, (1<<20)+1))
+	if err != nil || len(body) > 1<<20 {
+		return `{"error":"音频转写服务响应无效或过大"}`
+	}
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Sprintf(`{"error":"音频转写服务请求失败 (%d)"}`, resp.StatusCode)
 	}
 
-	var result struct{ Text string `json:"text"` }
-	json.Unmarshal(body, &result)
+	var result struct {
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil || len(result.Text) > maxChatContextBytes {
+		return `{"error":"音频转写服务响应无效"}`
+	}
 	data, _ := json.Marshal(map[string]string{"text": result.Text})
 	return string(data)
 }
 
 // AudioIsAvailable checks if Stereo Mix or loopback is available
 func (a *App) AudioIsAvailable() string {
+	if err := a.requireAuthenticated(); err != nil {
+		return fmt.Sprintf(`{"error":%q}`, err.Error())
+	}
 	scriptPath := a.findAudioScript()
 	if scriptPath == "" {
 		return `{"available":false}`
@@ -193,16 +226,34 @@ func (a *App) AudioIsAvailable() string {
 		return `{"available":false}`
 	}
 
-	// 首选立体声混音设备
+	// Prefer true WASAPI loopback. It mirrors the playback endpoint without
+	// changing the default output route, so speakers/headphones keep playing.
+	for _, d := range devices {
+		if d.Type == "system_audio" && d.IsLoopback {
+			data, _ := json.Marshal(map[string]interface{}{
+				"available":   true,
+				"deviceId":    d.Index,
+				"deviceName":  d.Name,
+				"deviceType":  d.Type,
+				"sampleRate":  d.SampleRate,
+				"recommended": true,
+				"backend":     d.Backend,
+				"captureMode": d.CaptureMode,
+			})
+			return string(data)
+		}
+	}
+
+	// Legacy fallback: Stereo Mix.
 	for _, d := range devices {
 		if d.Type == "stereo_mix" {
 			data, _ := json.Marshal(map[string]interface{}{
-				"available":    true,
-				"deviceId":     d.Index,
-				"deviceName":   d.Name,
-				"deviceType":   d.Type,
-				"sampleRate":   d.SampleRate,
-				"recommended":  true,
+				"available":   true,
+				"deviceId":    d.Index,
+				"deviceName":  d.Name,
+				"deviceType":  d.Type,
+				"sampleRate":  d.SampleRate,
+				"recommended": true,
 			})
 			return string(data)
 		}
@@ -212,11 +263,11 @@ func (a *App) AudioIsAvailable() string {
 	for _, d := range devices {
 		if d.IsDefault {
 			data, _ := json.Marshal(map[string]interface{}{
-				"available":   true,
-				"deviceId":    d.Index,
-				"deviceName":  d.Name,
-				"deviceType":  d.Type,
-				"sampleRate":  d.SampleRate,
+				"available":  true,
+				"deviceId":   d.Index,
+				"deviceName": d.Name,
+				"deviceType": d.Type,
+				"sampleRate": d.SampleRate,
 			})
 			return string(data)
 		}

@@ -19,11 +19,26 @@ func NewProfileManager() *ProfileManager {
 	return &ProfileManager{}
 }
 
-// GetProfile returns the current profile
+// GetProfile returns a deep copy of the current profile
 func (pm *ProfileManager) GetProfile() ProfileData {
 	pm.mu.RLock()
 	defer pm.mu.RUnlock()
-	return pm.profile
+	return cloneProfile(pm.profile)
+}
+
+func cloneProfile(profile ProfileData) ProfileData {
+	clone := profile
+	if profile.SkillCards != nil {
+		clone.SkillCards = make([]SkillCard, len(profile.SkillCards))
+		for i, card := range profile.SkillCards {
+			clone.SkillCards[i] = card
+			clone.SkillCards[i].TechStack = append([]string(nil), card.TechStack...)
+			clone.SkillCards[i].Highlights = append([]string(nil), card.Highlights...)
+			clone.SkillCards[i].Challenges = append([]string(nil), card.Challenges...)
+			clone.SkillCards[i].Keywords = append([]string(nil), card.Keywords...)
+		}
+	}
+	return clone
 }
 
 // UpdateResume updates the raw resume text
@@ -98,20 +113,8 @@ func (pm *ProfileManager) CreateSnapshot() ProfileSnapshot {
 	defer pm.mu.RUnlock()
 
 	snapshot := ProfileSnapshot{
-		ID: "snap-" + itoa(int(nowUnix())),
-		Profile: ProfileData{
-			ResumeRaw:     pm.profile.ResumeRaw,
-			ResumeSummary: pm.profile.ResumeSummary,
-			JDSummary:     pm.profile.JDSummary,
-			Language:      pm.profile.Language,
-		},
-	}
-
-	// Deep copy skill cards
-	snapshot.Profile.SkillCards = make([]SkillCard, len(pm.profile.SkillCards))
-	for i, c := range pm.profile.SkillCards {
-		clone := c
-		snapshot.Profile.SkillCards[i] = clone
+		ID:      "snap-" + itoa(int(nowUnix())),
+		Profile: cloneProfile(pm.profile),
 	}
 
 	pm.snapshot = &snapshot

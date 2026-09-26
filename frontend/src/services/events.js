@@ -1,41 +1,63 @@
 /**
- * Wails Event Bus — 统一注册所有后端事件
- * 在 App.vue onMounted 中调用 initEvents() 一次即可
+ * Wails event multiplexer. One native subscription is shared by all handlers
+ * so unmounting one component cannot remove another component's listener.
  */
 import { EventsOn, EventsOff } from '../../wailsjs/runtime/runtime'
 
-const handlers = {}
+const subscriptions = new Map()
 
-/**
- * 注册事件处理函数
- * @param {string} event - 事件名
- * @param {Function} handler - 处理函数
- */
-export function on(event, handler) {
-  if (!handlers[event]) {
-    handlers[event] = []
-    EventsOn(event, (...args) => {
-      handlers[event].forEach(fn => fn(...args))
-    })
+function removeNative(event, entry) {
+  if (entry.nativeUnsubscribe) {
+    entry.nativeUnsubscribe()
+  } else {
+    EventsOff(event)
   }
-  handlers[event].push(handler)
 }
 
-/**
- * 移除事件的所有处理函数，同时清理 Wails 底层监听
- * @param {string} event - 事件名
- */
-export function off(event) {
-  delete handlers[event]
-  EventsOff(event)
+export function on(event, handler) {
+  if (typeof handler !== 'function') return () => {}
+
+  let entry = subscriptions.get(event)
+  if (!entry) {
+    entry = { handlers: new Set(), nativeUnsubscribe: null }
+    entry.nativeUnsubscribe = EventsOn(event, (...args) => {
+      for (const fn of [...entry.handlers]) fn(...args)
+    })
+    subscriptions.set(event, entry)
+  }
+  entry.handlers.add(handler)
+
+  let active = true
+  return () => {
+    if (!active) return
+    active = false
+    entry.handlers.delete(handler)
+    if (entry.handlers.size === 0 && subscriptions.get(event) === entry) {
+      subscriptions.delete(event)
+      removeNative(event, entry)
+    }
+  }
 }
 
-/**
- * 批量注册事件
- * @param {Object} map - { eventName: handler }
- */
+export function off(event, handler) {
+  const entry = subscriptions.get(event)
+  if (!entry) return
+  if (handler) {
+    entry.handlers.delete(handler)
+    if (entry.handlers.size > 0) return
+  } else {
+    entry.handlers.clear()
+  }
+  subscriptions.delete(event)
+  removeNative(event, entry)
+}
+
 export function onMany(map) {
-  for (const [event, handler] of Object.entries(map)) {
-    on(event, handler)
+  const cleanups = Object.entries(map).map(([event, handler]) => on(event, handler))
+  let active = true
+  return () => {
+    if (!active) return
+    active = false
+    cleanups.forEach(cleanup => cleanup())
   }
 }

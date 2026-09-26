@@ -27,11 +27,10 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import Icon from './Icon.vue'
-import { api } from '../services/api'
 import { useSettingsStore } from '../stores/settings'
-import { on } from '../services/events'
+import { onMany } from '../services/events'
 
 const settingsStore = useSettingsStore()
 const sendShortcut = settingsStore.sendShortcut
@@ -39,22 +38,28 @@ const deleteShortcut = settingsStore.deleteShortcut
 
 const screenshots = ref([])
 
-// 监听后端事件
-on('screenshot-taken', (base64, count) => {
-  screenshots.value.push(base64)
+let disposeEvents = null
+
+onMounted(() => {
+  disposeEvents = onMany({
+    'screenshot-taken': (base64) => {
+      screenshots.value.push(base64)
+    },
+    'screenshot-removed': (index) => {
+      screenshots.value.splice(index, 1)
+    },
+    'screenshots-cleared': () => {
+      screenshots.value = []
+    },
+    'start-solving': () => {
+      screenshots.value = []
+    },
+  })
 })
 
-on('screenshot-removed', (index, count) => {
-  screenshots.value.splice(index, 1)
-})
-
-on('screenshots-cleared', () => {
-  screenshots.value = []
-})
-
-// 发送后清空
-on('start-solving', () => {
-  screenshots.value = []
+onUnmounted(() => {
+  disposeEvents?.()
+  disposeEvents = null
 })
 
 defineExpose({ screenshots })

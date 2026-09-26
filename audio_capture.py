@@ -23,6 +23,15 @@ from typing import Optional
 import sounddevice as sd
 import numpy as np
 
+try:
+    from sidecar.audio import AudioRecorder as SidecarAudioRecorder
+    from sidecar.audio import init_audio as init_sidecar_audio
+    from sidecar.audio import list_input_devices as list_sidecar_devices
+except ImportError:
+    SidecarAudioRecorder = None
+    init_sidecar_audio = None
+    list_sidecar_devices = None
+
 # ── 常量 ──────────────────────────────────────────────────────
 TARGET_SAMPLE_RATE = 16000  # Whisper/DashScope 最佳采样率
 RECORD_CHANNELS = 1
@@ -43,7 +52,15 @@ _selected_device_id: Optional[int] = None
 # ================================================================
 
 def list_devices() -> list[dict]:
-    """列出所有音频输入设备，标记立体声混音设备"""
+    """列出系统 loopback 和兼容输入设备。"""
+    if list_sidecar_devices is not None:
+        try:
+            devices = list_sidecar_devices()
+            # Wails 旧接口使用 index；sidecar 已为 loopback 提供稳定的负索引。
+            return [{**device, 'index': device.get('index', device.get('id', -1))} for device in devices]
+        except Exception as exc:
+            print(f"[AudioCapture] Sidecar device list failed: {exc}", file=sys.stderr)
+
     devices = sd.query_devices()
     result = []
     try:
@@ -230,15 +247,45 @@ def audio_callback(indata, frames, time_info, status):
 # 录音控制
 # ================================================================
 
+def _capture_with_sidecar(device_id: Optional[int], duration: float) -> Optional[str]:
+    """Use the shared WASAPI loopback backend without changing playback routing."""
+    if SidecarAudioRecorder is None or init_sidecar_audio is None:
+        return None
+    recorder = None
+    try:
+        if device_id is not None and device_id >= 0:
+            init_sidecar_audio(device_id=device_id, backend="sounddevice")
+        elif device_id is not None and device_id < 0 and list_sidecar_devices is not None:
+            selected = next((item for item in list_sidecar_devices() if item.get("id") == device_id), None)
+            if selected:
+                init_sidecar_audio(
+                    backend="soundcard_loopback",
+                    speaker_id=selected.get("speaker_id"),
+                )
+        recorder = SidecarAudioRecorder()
+        recorder.start_recording()
+        time.sleep(duration)
+        audio = recorder.stop_recording()
+        if audio.size == 0:
+            return json.dumps({'error': 'No system audio captured'})
+        return _frames_to_wav_json([audio], TARGET_SAMPLE_RATE)
+    except Exception as exc:
+        print(f"[AudioCapture] Loopback capture failed: {exc}", file=sys.stderr)
+        return None
+    finally:
+        if recorder is not None:
+            recorder.close()
+
+
 def start_recording(device_id: Optional[int] = None, duration: Optional[float] = None):
     """开始录音"""
-    global _recording, _audio_frames, _selected_device_id
+    global _recording, _audio_frames, _selected_device_id, _last_sample_rate_value
 
     if device_id is None:
         device_id, device_name = find_best_input_device()
         if device_id is None:
             return json.dumps({'error': 'No input device available'})
-        _selected_device_id = device_id
+    _selected_device_id = device_id
 
     with _frames_lock:
         _recording = True
@@ -250,6 +297,7 @@ def start_recording(device_id: Optional[int] = None, duration: Optional[float] =
         actual_rate = int(dev_info.get('default_samplerate', 48000) if isinstance(dev_info, dict) else dev_info.default_samplerate)
     except Exception:
         actual_rate = 48000
+    _last_sample_rate_value = actual_rate
 
     try:
         stream = sd.InputStream(
@@ -324,7 +372,8 @@ def _frames_to_wav_json(frames: list[np.ndarray], record_sample_rate: int) -> st
             data = data.astype(np.int16)
 
     if data.ndim > 1:
-        data = data.flatten()
+        # Downmix channels; flattening would interleave channels and corrupt duration.
+        data = np.mean(data.astype(np.float32), axis=1)
 
     # 应用音频增强
     enhanced = enhance_audio(data.astype(np.float32) / 32767.0, record_sample_rate)
@@ -385,11 +434,10 @@ if __name__ == '__main__':
         for d in devices:
             if d['type'] == 'stereo_mix':
                 d['recommended'] = True
-        print(json.dumps(devices, ensure_ascii=False))
+        print(json.dumps(devices, ensure_ascii=True))
 
     elif command == 'start':
         device = int(sys.argv[2]) if len(sys.argv) > 2 else None
-        _last_sample_rate_value = device
         result = start_recording(device)
         print(result)
 
@@ -400,5 +448,7 @@ if __name__ == '__main__':
     elif command == 'capture':
         device = int(sys.argv[2]) if len(sys.argv) > 2 else None
         dur = float(sys.argv[3]) if len(sys.argv) > 3 else 5.0
-        result = start_recording(device, dur)
+        result = _capture_with_sidecar(device, dur)
+        if result is None:
+            result = start_recording(device, dur)
         print(result)

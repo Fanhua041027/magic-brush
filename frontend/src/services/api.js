@@ -1,7 +1,9 @@
 import {
+  CancelRequest,
   CancelRunningTask,
   CheckScreenCapturePermission,
   ClearResume,
+  GetAudioLevel,
   GetDomainCategories,
   GetInitStatus,
   GetModels,
@@ -46,6 +48,7 @@ import {
   ChatWithScreenshot,
   IsStandaloneInterview,
   OpenStandaloneInterview,
+  AuthCurrent,
   // Audio & Interview API
   AudioListDevices,
   AudioCapture,
@@ -70,6 +73,7 @@ export const api = {
   removeScreenshot: (index) => RemoveScreenshot(index),
   clearScreenshots: () => ClearScreenshots(),
   cancelTask: () => CancelRunningTask(),
+  cancelRequest: (requestId) => CancelRequest(requestId),
 
   startRecordingKey: (action) => StartRecordingKey(action),
   stopRecordingKey: () => StopRecordingKey(),
@@ -111,10 +115,11 @@ export const api = {
   setUserMessage: (text) => SetPendingUserMessage(text),
 
   chatWithDeepSeek: (message) => ChatWithDeepSeek(message),
-  chatWithDeepSeekStream: (message) => ChatWithDeepSeekStream(message),
-  chatWithDeepSeekStreamWithContext: (messages) => ChatWithDeepSeekStreamWithContext(messages),
-  chatWithScreenshot: (message, screenshot, context) => ChatWithScreenshot(message, screenshot, context),
+  chatWithDeepSeekStream: (requestId, message) => ChatWithDeepSeekStream(requestId, message),
+  chatWithDeepSeekStreamWithContext: (requestId, messages) => ChatWithDeepSeekStreamWithContext(requestId, messages),
+  chatWithScreenshot: (requestId, message, screenshot, context) => ChatWithScreenshot(requestId, message, screenshot, context),
   isStandaloneInterview: () => IsStandaloneInterview(),
+  getCurrentUser: () => AuthCurrent(),
   openStandaloneInterview: () => OpenStandaloneInterview(),
 
   // Audio & Interview API
@@ -124,12 +129,9 @@ export const api = {
   audioIsAvailable: () => AudioIsAvailable(),
   generateInterviewAnswer: (query) => GenerateInterviewAnswer(query),
 
-  // Sidecar 直接 HTTP API
-  async audioLevel() {
+  audioLevel: async () => {
     try {
-      const resp = await fetch('http://127.0.0.1:18765/api/audio/level')
-      if (!resp.ok) return { level: 0 }
-      return await resp.json()
+      return await GetAudioLevel()
     } catch {
       return { level: 0 }
     }

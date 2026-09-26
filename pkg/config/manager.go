@@ -51,7 +51,7 @@ func (cm *ConfigManager) getConfigPath() string {
 	// 拼接项目名称目录
 	appDir = filepath.Join(sysConfigDir, common.AppName)
 
-	if err := os.MkdirAll(appDir, 0755); err != nil {
+	if err := os.MkdirAll(appDir, 0700); err != nil {
 	}
 	fullPath := filepath.Join(appDir, "config")
 	logger.Println("配置文件路径", fullPath)
@@ -63,22 +63,35 @@ func (cm *ConfigManager) Load() error {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
-	// 先设置默认值
-	cm.config = NewDefaultConfig()
-	// 从文件加载（AES 加密存储）
+	candidate := NewDefaultConfig()
+	migrateLegacy := false
 	data, err := os.ReadFile(cm.configPath)
 	if err != nil {
 		if !os.IsNotExist(err) {
 			logger.Printf("加载配置文件失败 (使用默认配置): %v", err)
 		}
 	} else {
-		plain, err := decrypt(data)
-		if err != nil {
-			logger.Printf("解密配置文件失败 (使用默认配置): %v", err)
-		} else if err := json.Unmarshal(plain, &cm.config); err != nil {
-			logger.Printf("解析配置文件失败: %v", err)
+		legacyFormat := len(data) < len(currentCipherHeader) || string(data[:len(currentCipherHeader)]) != string(currentCipherHeader)
+		plain, decryptErr := decrypt(data)
+		if decryptErr != nil {
+			logger.Printf("解密配置文件失败 (使用默认配置): %v", decryptErr)
+		} else {
+			merged, parseErr := mergeConfig(candidate, plain)
+			if parseErr != nil {
+				logger.Printf("解析配置文件失败 (使用默认配置): %v", parseErr)
+			} else {
+				candidate = merged
+				migrateLegacy = legacyFormat
+			}
 		}
 	}
+
+	if err := candidate.Validate(); err != nil {
+		logger.Printf("配置校验失败 (使用默认配置): %v", err)
+		candidate = NewDefaultConfig()
+	}
+	cm.config = candidate
+	cm.oldConfig = candidate
 
 	// 确保默认快捷键都存在（防止新增快捷键被旧配置覆盖）
 	defaultShortcuts := NewDefaultConfig().Shortcuts
@@ -92,6 +105,11 @@ func (cm *ConfigManager) Load() error {
 		}
 	}
 
+	if migrateLegacy {
+		if err := cm.saveLocked(); err != nil {
+			logger.Printf("迁移旧配置加密格式失败: %v", err)
+		}
+	}
 	logger.Println("配置已加载")
 	return nil
 }
@@ -99,7 +117,10 @@ func (cm *ConfigManager) Load() error {
 func (cm *ConfigManager) Save() error {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
+	return cm.saveLocked()
+}
 
+func (cm *ConfigManager) saveLocked() error {
 	plain, err := json.MarshalIndent(cm.config, "", "  ")
 	if err != nil {
 		return fmt.Errorf("序列化配置失败: %w", err)
@@ -108,12 +129,63 @@ func (cm *ConfigManager) Save() error {
 	if err != nil {
 		return fmt.Errorf("加密配置失败: %w", err)
 	}
-	if err := os.WriteFile(cm.configPath, data, 0644); err != nil {
-		return fmt.Errorf("写入配置文件失败: %w", err)
+	tmp, err := os.CreateTemp(filepath.Dir(cm.configPath), ".config-*.tmp")
+	if err != nil {
+		return fmt.Errorf("创建配置临时文件失败: %w", err)
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+	if err := tmp.Chmod(0600); err != nil {
+		tmp.Close()
+		return fmt.Errorf("设置配置临时文件权限失败: %w", err)
+	}
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return fmt.Errorf("写入配置临时文件失败: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return fmt.Errorf("同步配置临时文件失败: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("关闭配置临时文件失败: %w", err)
+	}
+	if err := atomicReplaceFile(tmpPath, cm.configPath); err != nil {
+		return fmt.Errorf("替换配置文件失败: %w", err)
+	}
+	if err := os.Chmod(cm.configPath, 0600); err != nil {
+		return fmt.Errorf("设置配置文件权限失败: %w", err)
 	}
 
 	logger.Printf("配置已保存到: %s", cm.configPath)
 	return nil
+}
+
+func mergeConfig(base Config, raw []byte) (Config, error) {
+	defaults, err := json.Marshal(base)
+	if err != nil {
+		return Config{}, err
+	}
+	var merged map[string]json.RawMessage
+	if err := json.Unmarshal(defaults, &merged); err != nil {
+		return Config{}, err
+	}
+	var incoming map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &incoming); err != nil {
+		return Config{}, err
+	}
+	for key, value := range incoming {
+		merged[key] = value
+	}
+	combined, err := json.Marshal(merged)
+	if err != nil {
+		return Config{}, err
+	}
+	var out Config
+	if err := json.Unmarshal(combined, &out); err != nil {
+		return Config{}, err
+	}
+	return out, nil
 }
 
 func (cm *ConfigManager) Get() Config {
@@ -124,44 +196,85 @@ func (cm *ConfigManager) Get() Config {
 
 // UpdateFromJSON 从前端 JSON 全量更新配置
 func (cm *ConfigManager) UpdateFromJSON(jsonStr string) error {
-	var newConfig Config
-	if err := json.Unmarshal([]byte(jsonStr), &newConfig); err != nil {
+	cm.mu.Lock()
+	oldConfig := cm.config
+	newConfig, err := mergeConfig(oldConfig, []byte(jsonStr))
+	if err != nil {
+		cm.mu.Unlock()
 		return fmt.Errorf("解析配置 JSON 失败: %w", err)
 	}
+	if err := newConfig.Validate(); err != nil {
+		cm.mu.Unlock()
+		return fmt.Errorf("配置校验失败: %w", err)
+	}
 
-	cm.mu.Lock()
-	cm.oldConfig = cm.config //保存当前配置为之前的配置
+	cm.oldConfig = oldConfig
 	cm.config = newConfig
+	if err := cm.saveLocked(); err != nil {
+		cm.config = oldConfig
+		cm.oldConfig = oldConfig
+		cm.mu.Unlock()
+		return err
+	}
 	configCopy := cm.config
 	oldConfigCopy := cm.oldConfig
-	subscribers := cm.subscribers
+	subscribers := append([]func(Config, Config){}, cm.subscribers...)
 	cm.mu.Unlock()
 
-	// 通知订阅者
 	for _, sub := range subscribers {
 		sub(configCopy, oldConfigCopy)
 	}
+	return nil
+}
 
-	return cm.Save()
+func cloneConfig(src Config) (Config, error) {
+	data, err := json.Marshal(src)
+	if err != nil {
+		return Config{}, err
+	}
+	var dst Config
+	if err := json.Unmarshal(data, &dst); err != nil {
+		return Config{}, err
+	}
+	return dst, nil
 }
 
 // Patch 部分更新配置字段（避免全量序列化/反序列化的开销）
-// patchFn 接收当前配置指针，直接修改需要变更的字段
+// patchFn 接收当前配置副本，直接修改需要变更的字段
 func (cm *ConfigManager) Patch(patchFn func(cfg *Config)) error {
 	cm.mu.Lock()
-	cm.oldConfig = cm.config
-	patchFn(&cm.config)
+	oldConfig, err := cloneConfig(cm.config)
+	if err != nil {
+		cm.mu.Unlock()
+		return fmt.Errorf("复制配置失败: %w", err)
+	}
+	candidate, err := cloneConfig(oldConfig)
+	if err != nil {
+		cm.mu.Unlock()
+		return fmt.Errorf("复制配置失败: %w", err)
+	}
+	patchFn(&candidate)
+	if err := candidate.Validate(); err != nil {
+		cm.mu.Unlock()
+		return fmt.Errorf("配置校验失败: %w", err)
+	}
+	cm.oldConfig = oldConfig
+	cm.config = candidate
+	if err := cm.saveLocked(); err != nil {
+		cm.config = oldConfig
+		cm.oldConfig = oldConfig
+		cm.mu.Unlock()
+		return err
+	}
 	configCopy := cm.config
 	oldConfigCopy := cm.oldConfig
-	subscribers := cm.subscribers
+	subscribers := append([]func(Config, Config){}, cm.subscribers...)
 	cm.mu.Unlock()
 
-	// 通知订阅者
 	for _, sub := range subscribers {
 		sub(configCopy, oldConfigCopy)
 	}
-
-	return cm.Save()
+	return nil
 }
 
 func (cm *ConfigManager) Subscribe(callback func(NewConfig Config, oldConfig Config)) {

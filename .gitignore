@@ -13,6 +13,7 @@ lib/models/
 # Local config and cache
 config/config.json
 .gocache/
+supabase/.temp/
 
 # IDE, editor and OS files
 .idea/
@@ -27,6 +28,7 @@ Thumbs.db
 # Environment files
 .env
 .env.*
+!.env.example
 
 # Logs
 *.log

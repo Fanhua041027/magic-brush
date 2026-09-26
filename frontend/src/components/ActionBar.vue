@@ -21,7 +21,7 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, onUnmounted } from 'vue'
 import Icon from './Icon.vue'
 
 const props = defineProps({
@@ -33,22 +33,40 @@ const props = defineProps({
 defineEmits(['export'])
 
 const copied = ref(false)
+let copyTimer = null
+let disposed = false
+
+function showCopied() {
+  if (disposed) return
+  copied.value = true
+  if (copyTimer !== null) clearTimeout(copyTimer)
+  copyTimer = setTimeout(() => {
+    copyTimer = null
+    if (!disposed) copied.value = false
+  }, 2000)
+}
+
+onUnmounted(() => {
+  disposed = true
+  if (copyTimer !== null) clearTimeout(copyTimer)
+})
 
 function handleCopy() {
   if (!props.content) return
   navigator.clipboard.writeText(props.content).then(() => {
-    copied.value = true
-    setTimeout(() => { copied.value = false }, 2000)
+    showCopied()
   }).catch(() => {
     // Fallback
     const ta = document.createElement('textarea')
-    ta.value = props.content
-    document.body.appendChild(ta)
-    ta.select()
-    document.execCommand('copy')
-    document.body.removeChild(ta)
-    copied.value = true
-    setTimeout(() => { copied.value = false }, 2000)
+    try {
+      ta.value = props.content
+      document.body.appendChild(ta)
+      ta.select()
+      document.execCommand('copy')
+      showCopied()
+    } finally {
+      ta.remove()
+    }
   })
 }
 </script>

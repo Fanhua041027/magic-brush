@@ -9,16 +9,40 @@ import (
 	"io"
 )
 
-// 固定密钥：由常量字符串 SHA256 得到 32 字节，用于 AES-256-GCM
-var aesKey []byte
-
-func init() {
+var legacyAESKey = func() []byte {
 	h := sha256.Sum256([]byte("JTwZwHaMq3g55PfVgxkah1Edst59LoyF"))
-	aesKey = h[:]
-}
+	return h[:]
+}()
+
+var currentCipherHeader = []byte("MB2\x00")
 
 func encrypt(plaintext []byte) ([]byte, error) {
-	block, err := aes.NewCipher(aesKey)
+	key, err := currentEncryptionKey()
+	if err != nil {
+		return nil, err
+	}
+	sealed, err := sealWithKey(key, plaintext)
+	if err != nil {
+		return nil, err
+	}
+	return append(append([]byte{}, currentCipherHeader...), sealed...), nil
+}
+
+func decrypt(ciphertext []byte) ([]byte, error) {
+	key := legacyAESKey
+	if len(ciphertext) >= len(currentCipherHeader) && string(ciphertext[:len(currentCipherHeader)]) == string(currentCipherHeader) {
+		var err error
+		key, err = currentEncryptionKey()
+		if err != nil {
+			return nil, err
+		}
+		ciphertext = ciphertext[len(currentCipherHeader):]
+	}
+	return openWithKey(key, ciphertext)
+}
+
+func sealWithKey(key, plaintext []byte) ([]byte, error) {
+	block, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, err
 	}
@@ -33,8 +57,8 @@ func encrypt(plaintext []byte) ([]byte, error) {
 	return gcm.Seal(nonce, nonce, plaintext, nil), nil
 }
 
-func decrypt(ciphertext []byte) ([]byte, error) {
-	block, err := aes.NewCipher(aesKey)
+func openWithKey(key, ciphertext []byte) ([]byte, error) {
+	block, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, err
 	}

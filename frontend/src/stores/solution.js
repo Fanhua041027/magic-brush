@@ -2,7 +2,7 @@
  * Solution Store — 解题结果、流式输出、历史记录
  */
 import { defineStore } from 'pinia'
-import { ref, reactive, computed } from 'vue'
+import { ref, reactive, computed, onScopeDispose } from 'vue'
 import { renderMarkdownWithLatex } from '../utils/markdown-latex'
 import { api } from '../services/api'
 
@@ -25,11 +25,28 @@ export const useSolutionStore = defineStore('solution', () => {
   let thinkingStartTime = 0
   let stallTimer = null
   let pendingUserScreenshot = ''
+  let activeRequestId = null
+  let activeRound = null
+
+  function createId() {
+    if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID()
+    const bytes = new Uint8Array(16)
+    globalThis.crypto.getRandomValues(bytes)
+    return Array.from(bytes, value => value.toString(16).padStart(2, '0')).join('')
+  }
 
   // 流式渲染：节流 + 全量渲染
   let renderRafId = null
   let renderDirty = false
   const streamingHtml = ref('')
+
+  onScopeDispose(() => {
+    if (renderRafId !== null) cancelAnimationFrame(renderRafId)
+    if (stallTimer !== null) clearTimeout(stallTimer)
+    renderRafId = null
+    stallTimer = null
+    renderDirty = false
+  })
 
   // Error state
   const errorState = reactive({
@@ -67,14 +84,18 @@ export const useSolutionStore = defineStore('solution', () => {
 
   function createHistoryItem(userScreenshot) {
     return {
+      id: createId(),
+      createdAt: new Date().toISOString(),
       time: new Date().toLocaleTimeString(),
-      rounds: [{ userScreenshot: userScreenshot || '', thinking: '', aiResponse: '', error: null }],
+      rounds: [{ id: createId(), createdAt: new Date().toISOString(), userScreenshot: userScreenshot || '', thinking: '', aiResponse: '', error: null }],
     }
   }
 
   function addRoundToItem(item, userScreenshot) {
     if (!item.rounds) item.rounds = []
     item.rounds.push({
+      id: createId(),
+      createdAt: new Date().toISOString(),
       userScreenshot: userScreenshot || '',
       thinking: '',
       thinkingStatus: 'Thinking Process',
@@ -109,7 +130,18 @@ export const useSolutionStore = defineStore('solution', () => {
     if (history.value[idx]) activeHistoryIndex.value = idx
   }
 
-  function handleStreamStart(keepContext) {
+  function beginRequest(requestId) {
+    if (!requestId) return
+    activeRequestId = requestId
+    activeRound = null
+  }
+
+  function isActiveRequest(requestId) {
+    return !!requestId && requestId === activeRequestId
+  }
+
+  function handleStreamStart(payload, keepContext) {
+    if (!payload || !isActiveRequest(payload.requestId)) return
     streamBuffer = ''
     thinkingBuffer = ''
     thinkingStartTime = 0
@@ -146,9 +178,12 @@ export const useSolutionStore = defineStore('solution', () => {
       activeHistoryIndex.value = 0
       pendingUserScreenshot = ''
     }
+    activeRound = getCurrentRound(history.value[0])
   }
 
-  function handleStreamChunk(token) {
+  function handleStreamChunk(payload) {
+    if (!payload || !isActiveRequest(payload.requestId)) return
+    const token = payload.chunk || ''
     if (isLoading.value) isLoading.value = false
     if (isAppending.value) isAppending.value = false
     if (isThinking.value) {
@@ -158,10 +193,7 @@ export const useSolutionStore = defineStore('solution', () => {
     }
     streamBuffer += token
 
-    if (history.value.length > 0) {
-      const round = getCurrentRound(history.value[0])
-      if (round) round.aiResponse = streamBuffer
-    }
+    if (activeRound) activeRound.aiResponse = streamBuffer
 
     // 用 rAF 节流渲染，避免每个 token 都触发 DOM 更新
     if (!renderDirty) {
@@ -175,7 +207,9 @@ export const useSolutionStore = defineStore('solution', () => {
     }
   }
 
-  function handleThinkingChunk(token) {
+  function handleThinkingChunk(payload) {
+    if (!payload || !isActiveRequest(payload.requestId)) return
+    const token = payload.thinking || ''
     if (isLoading.value) isLoading.value = false
     if (isAppending.value) isAppending.value = false
     if (!isThinking.value) {
@@ -198,17 +232,16 @@ export const useSolutionStore = defineStore('solution', () => {
       else if (token.match(/analyse|analyze|review/i)) thinkingStatusText.value = 'Analyzing...'
     }
 
-    if (history.value.length > 0) {
-      const round = getCurrentRound(history.value[0])
-      if (round) {
-        round.thinking = thinkingBuffer
-        round.thinkingStatus = thinkingStatusText.value
-      }
+    if (activeRound) {
+      activeRound.thinking = thinkingBuffer
+      activeRound.thinkingStatus = thinkingStatusText.value
     }
     scrollContentToBottom()
   }
 
-  function handleSolution(data) {
+  function handleSolution(payload) {
+    if (!payload || !isActiveRequest(payload.requestId)) return false
+    const data = payload.content || ''
     isLoading.value = false
     isAppending.value = false
     isThinking.value = false
@@ -217,10 +250,10 @@ export const useSolutionStore = defineStore('solution', () => {
     if (renderRafId) { cancelAnimationFrame(renderRafId); renderRafId = null }
     renderDirty = false
     streamingHtml.value = ''
-    if (history.value.length > 0) {
-      const round = getCurrentRound(history.value[0])
-      if (round && !round.aiResponse) round.aiResponse = data
-    }
+    if (activeRound && !activeRound.aiResponse) activeRound.aiResponse = data
+    activeRequestId = null
+    activeRound = null
+    return true
   }
 
   function handleInlineError(errorInfo) {
@@ -239,6 +272,28 @@ export const useSolutionStore = defineStore('solution', () => {
       }
     }
     return false
+  }
+
+  function endRequest(requestId) {
+    if (!isActiveRequest(requestId)) return false
+    activeRequestId = null
+    activeRound = null
+    return true
+  }
+
+  async function cancelActiveRequest() {
+    const requestId = activeRequestId
+    if (!requestId) return false
+    endRequest(requestId)
+    isLoading.value = false
+    isAppending.value = false
+    isThinking.value = false
+    if (stallTimer) clearTimeout(stallTimer)
+    if (renderRafId) {
+      cancelAnimationFrame(renderRafId)
+      renderRafId = null
+    }
+    return api.cancelRequest(requestId)
   }
 
   function clearInlineError() {
@@ -279,7 +334,10 @@ export const useSolutionStore = defineStore('solution', () => {
     leftPanel.appendChild(userHeader)
     if (round.userScreenshot) {
       const imgC = document.createElement('div')
-      imgC.innerHTML = `<img src="${round.userScreenshot}" style="width:100%;border-radius:6px;border:1px solid #e2e8f0;" />`
+      const image = document.createElement('img')
+      image.src = round.userScreenshot
+      image.style.cssText = 'width:100%;border-radius:6px;border:1px solid #e2e8f0;'
+      imgC.appendChild(image)
       leftPanel.appendChild(imgC)
     } else {
       const ph = document.createElement('div')
@@ -309,9 +367,10 @@ export const useSolutionStore = defineStore('solution', () => {
     if (!item) return
     const rounds = item.rounds || []
     if (rounds.length === 0) return
+    let container = null
     try {
       const { default: html2canvas } = await import('html2canvas')
-      const container = document.createElement('div')
+      container = document.createElement('div')
       container.style.cssText = 'position:fixed;left:-9999px;top:0;width:900px;padding:28px;background:linear-gradient(135deg,#f8fafc 0%,#e2e8f0 100%);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#1e293b;border-radius:16px;'
       if (rounds.length > 1) {
         const title = document.createElement('div')
@@ -326,11 +385,12 @@ export const useSolutionStore = defineStore('solution', () => {
       container.appendChild(footer)
       document.body.appendChild(container)
       const canvas = await html2canvas(container, { backgroundColor: null, scale: 2, useCORS: true, logging: false })
-      document.body.removeChild(container)
       const b64 = canvas.toDataURL('image/png')
       await api.saveImageToFile(b64)
     } catch (e) {
       console.error('导出图片失败:', e)
+    } finally {
+      container?.remove()
     }
   }
 
@@ -339,7 +399,8 @@ export const useSolutionStore = defineStore('solution', () => {
     isThinking, thinkingStatusText, thinkingExpanded, isThinkingStalled,
     streamingHtml, errorState, currentRounds,
     renderMarkdown, getSummary, getRoundsCount, getFullContent, getThinkingPreview,
-    selectHistory, handleStreamStart, handleStreamChunk, handleThinkingChunk,
+    selectHistory, beginRequest, isActiveRequest, endRequest, cancelActiveRequest,
+    handleStreamStart, handleStreamChunk, handleThinkingChunk,
     handleSolution, handleInlineError, clearInlineError,
     setStreamBuffer, setUserScreenshot, deleteHistory, exportImage,
   }
